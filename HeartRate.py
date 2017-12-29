@@ -255,8 +255,43 @@ class ECGAnalysis(object):
 			Square filter data
 		"""
 		return data**2
-		
 	
+	def IntegratedAverageFilter(self,data,time,width=150,plot=False):
+		"""
+		Parameters
+		---------
+		data : float ndarray
+			ECG voltage data after squaring
+		time : float ndarray
+			Timings for samples associated with ECG data in seconds
+		width : int, optional
+			Time width (ms) of integration window.  Defaults to 150ms (0.15s)
+		plot : bool
+			Plot output data. Defaults to False
+			
+		Returns
+		-------
+		data_int : float ndarray
+			Average by integration data
+		time_int : float ndarray
+			Associated timings, cut by proper amount for integration-average filter
+		"""
+		dt = time[1]-time[0] #timestep
+		
+		#number of samples to use for integration average window
+		#window width in seconds/timestep
+		N = int((width/1000)/dt)
+		
+		data_int = (1/N)*np.array([sum(data[i-N:i+1]) for i in range(N,len(data))])
+		
+		if plot==True:
+			pl.figure(figsize=(9,5))
+			pl.plot(time[N:],data_int,label='Integrated')
+			pl.legend()
+			pl.xlabel('Time [s]')
+		
+		return data_int, time[N:] #timings shortened only in the beginning
+		
 v = np.genfromtxt('C:\\Users\\Lukas Adamowicz\\Dropbox\\Masters\\Project'+\
 				  '\\RespiratoryRate_HeartRate\\Python RRest\\sample_ecg.csv',\
 				  skip_header=0,unpack=True,delimiter=',')
