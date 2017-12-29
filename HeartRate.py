@@ -292,13 +292,13 @@ class ECGAnalysis(object):
 		
 		return data_int, time[N:] #timings shortened only in the beginning
 		
-	def FindPeaksLearning(self,v_band,t_band,v_int,v_der,width=150,t_learn=8,delay=175,debug=False):
+	def FindPeaksLearning(self,v_f,t_f,v_int,v_der,width=150,t_learn=8,delay=175,debug=False):
 		"""
 		Parameters
 		---------
-		v_band : float ndarray
-			Bandpassed ECG voltage signal (ie after Sub-cardiac freq elimination)
-		t_band : float ndarray
+		v_f : float ndarray
+			FilteredECG voltage signal (ie after Sub-cardiac freq elimination)
+		t_f : float ndarray
 			Timings associated with bandpassed ECG signal
 		v_int : float ndarray
 			Average by integration voltage signal.
@@ -313,26 +313,26 @@ class ECGAnalysis(object):
 		
 		Returns
 		-------
-		rr_avg : float
+		rr8 : float
 			Initial average R-R peak times
 		thr_int : list of floats
 			Integrated data thresholds and associated values.  3 values
 		thr_fil : list of floats
 			Filtered data thresholds and associated values.  3 values
 		"""
-		dt = t_band[1]-t_band[0]
+		dt = t_f[1]-t_f[0]
 		n_dly = int(delay/1000*self.fs) #number of samples corresponding to delay
 		n_25,n_125,n_225 = int(0.025*self.fs),int(0.125*self.fs),int(0.225*self.fs) #number of samples in 25,125,225ms
 		n_lrn = int(t_learn*self.fs) #number of samples in t_learn seconds
 		
 		#append 0s to front of integrated signal
-		v_int = np.append([0]*(len(v_band)-len(v_int)-2),v_int)
+		v_int = np.append([0]*(len(v_f)-len(v_int)-2),v_int)
 		v_der = np.append([0,0],v_der) #number of 0s needs to be changed if different derivative scheme
 		
-		v_band = v_band[:n_lrn] #want only beginning t_learn seconds
+		v_f = v_f[:n_lrn] #want only beginning t_learn seconds
 		v_int = v_int[:n_lrn]
 		v_der = v_der[:n_lrn]
-		t_band = t_band[:n_lrn]
+		t_f = t_f[:n_lrn]
 		
 		#peaks in region with width equal to integration width
 		ii_pks = signal.argrelmax(v_int,order=int(0.5*width/1000/dt))[0] 
@@ -342,11 +342,11 @@ class ECGAnalysis(object):
 		
 		#get integrated signal values
 		vi_pks = v_int[ii_pks]
-		ti_pks = t_band[ii_pks]
+		ti_pks = t_f[ii_pks]
 		
 		m_pos = [] #maximum positive slope in the t_delay region around each peak (+- t_delay)
 		pki_h = [] #descending half peak value points
-		band_pk = [] #max points in v_band preceeding descending half peak value points
+		band_pk = [] #max points in v_f preceeding descending half peak value points
 		
 		r_pk_b = [] #Boolean array for if the point is an R peak or not
 		
@@ -360,19 +360,19 @@ class ECGAnalysis(object):
 				longwave = True
 			
 			if longwave==False: #if not a long wave, search for max filtered peak in preceeding 125-225 ms
-				band_pk.append(np.argmax(v_band[pki_h[i]-n_225:pki_h[i]+n_125])+pki_h[i]-n_225)
+				band_pk.append(np.argmax(v_f[pki_h[i]-n_225:pki_h[i]+n_125])+pki_h[i]-n_225)
 			elif longwave==True: #if longwave, search in preceeding 150-250ms
-				band_pk.append(np.argmax(v_band[pki_h[i]-n_225+n_25:pki_h[i]+n_125+n_25])+pki_h[i]-n_225+n_25)
+				band_pk.append(np.argmax(v_f[pki_h[i]-n_225+n_25:pki_h[i]+n_125+n_25])+pki_h[i]-n_225+n_25)
 		band_pk = np.array(band_pk)
 		
 		#determing if R peak or T wave
 		for i in range(0,len(ii_pks),2):
 			#if time between peaks is less than 200ms, first is R, second is T
 			#Due to being faster than physiologically possible
-			if t_band[band_pk[i+1]]-t_band[band_pk[i]]<0.2:
+			if t_f[band_pk[i+1]]-t_f[band_pk[i]]<0.2:
 				r_pk_b.append([True,False])
 			#if time between peaks is less than 360ms but greater than 200ms
-			elif t_band[band_pk[i+1]]-t_band[band_pk[i]]<0.36:
+			elif t_f[band_pk[i+1]]-t_f[band_pk[i]]<0.36:
 				#then check the slope.  If slope i is twice as steep as slope i+1, point i is the qrs complex, point i+1 a t complex
 				if 0.5*m_pos[i] > m_pos[i+1]:
 					r_pk_b.append([True,False])
@@ -383,29 +383,29 @@ class ECGAnalysis(object):
 				elif 0.5*m_pos[i] < m_pos[i+1] and m_pos[i] > 0.5*m_pos[i+1]:
 					r_pk_b.append([True,True])
 			#if time between peaks is greater than 360ms, both are qrs peaks
-			elif t_band[band_pk[i+1]]-t_band[band_pk[i]]>0.36:
+			elif t_f[band_pk[i+1]]-t_f[band_pk[i]]>0.36:
 				r_pk_b.append([True,True])
 		
 		#assign r-peak values and timings, as well as t-wave values and timings		
-		r_v = v_band[band_pk[np.argwhere(np.array(r_pk_b).flatten()==True).flatten()]]
-		r_t = t_band[band_pk[np.argwhere(np.array(r_pk_b).flatten()==True).flatten()]]
-		t_v = v_band[band_pk[np.argwhere(np.array(r_pk_b).flatten()==False).flatten()]]
-		t_t = t_band[band_pk[np.argwhere(np.array(r_pk_b).flatten()==False).flatten()]]
+		r_v = v_f[band_pk[np.argwhere(np.array(r_pk_b).flatten()==True).flatten()]]
+		r_t = t_f[band_pk[np.argwhere(np.array(r_pk_b).flatten()==True).flatten()]]
+		t_v = v_f[band_pk[np.argwhere(np.array(r_pk_b).flatten()==False).flatten()]]
+		t_t = t_f[band_pk[np.argwhere(np.array(r_pk_b).flatten()==False).flatten()]]
 		
 		#Create R-R average arrays
 		if len(r_t)<=8:
-			rr_avg = np.ones(8)*r_t[1]-r_t[0]
-			rr_avg[-len(r_t)+1:] = np.array(r_t[1:])-np.array(r_t[:-1])
+			rr8 = np.ones(8)*r_t[1]-r_t[0]
+			rr8[-len(r_t)+1:] = np.array(r_t[1:])-np.array(r_t[:-1])
 		elif len(r_t)>8:
-			rr_avg = np.array(r_t[len(r_t)-8:])-np.array(r_t[len(r_t)-9:-1])
+			rr8 = np.array(r_t[len(r_t)-8:])-np.array(r_t[len(r_t)-9:-1])
 			
-		spk_i = 0.125*vi_pks[np.where(v_band[band_pk]==r_v[0])[0][0]] #initialize signal peak for integrated data
-		npk_i = 0.125*vi_pks[np.where(v_band[band_pk]==t_v[0])[0][0]] #initialize noise peak for integrated data
+		spk_i = 0.125*vi_pks[np.where(v_f[band_pk]==r_v[0])[0][0]] #initialize signal peak for integrated data
+		npk_i = 0.125*vi_pks[np.where(v_f[band_pk]==t_v[0])[0][0]] #initialize noise peak for integrated data
 		spk_f = 0.125*r_v[0] #initialize signal peak for filtered data
 		npk_f = 0.125*t_v[0] #initialize noise peak for filtered data
 		for i in range(1,len(r_v)):
-			spk_i = 0.125*vi_pks[np.where(v_band[band_pk]==r_v[i])[0][0]] + 0.875*spk_i
-			npk_i = 0.125*vi_pks[np.where(v_band[band_pk]==t_v[0])[0][0]] + 0.875*npk_i
+			spk_i = 0.125*vi_pks[np.where(v_f[band_pk]==r_v[i])[0][0]] + 0.875*spk_i
+			npk_i = 0.125*vi_pks[np.where(v_f[band_pk]==t_v[0])[0][0]] + 0.875*npk_i
 			spk_f = 0.125*r_v[i] + 0.875*spk_f
 			npk_f = 0.125*t_v[i] + 0.875*npk_f
 			thr_i = npk_i + 0.25*(spk_i-npk_i) #threshold for integrated data
@@ -413,23 +413,51 @@ class ECGAnalysis(object):
 			
 		if debug==True:
 			f,ax = pl.subplots(2,figsize=(9,5),sharex=True)
-			ax[0].plot(t_band,v_int)
+			ax[0].plot(t_f,v_int)
 			ax[0].plot(ti_pks,vi_pks,'o')
-			ax[0].plot(t_band[pki_h],v_int[pki_h],'o')
+			ax[0].plot(t_f[pki_h],v_int[pki_h],'o')
 			ax[0].axhline(thr_i,linestyle='--',color='k')
-			ax[1].plot(t_band,v_band)
+			ax[1].plot(t_f,v_f)
 			ax[1].plot(r_t,r_v,'ro')
 			ax[1].plot(t_t,t_v,'go')
 			ax[1].axhline(thr_f,linestyle='--',color='k')
 			pl.tight_layout()
 			
-		return rr_avg, [thr_i,spk_i,npk_i], [thr_f,spk_f,npk_f]
+		return rr8, [thr_i,spk_i,npk_i], [thr_f,spk_f,npk_f]
 	
 	@staticmethod
-	def _UpdateAvgRR(rr_int,rr_avg,rr_avg_lim):
+	def _UpdateAvgRR(rr_int,rr8,rr8_lim):
 		"""
 		Parameters
 		---------
+		rr_int : float
+			R-R time in seconds
+		rr8 : list of floats
+			List/array of last 8 R-R times in seconds
+		rr8_lim : list of floats
+			List/array of last 8 R-R times in seconds that were between 92-116% of avg(rr8)
+		
+		Returns
+		-------
+		rr8 : list of floats
+			Updated list/array of last 8 R-R times in seconds
+		rr8_lim : list of floats
+			Updated list/array of last 8 R-R times that were between 92-116% of avg(rr8)
+		"""
+		if rr_int>0.92*np.mean(rr8) and rr_int<1.16*np.mean(rr8):
+			rr8_lim[:-1] = rr8_lim[1:]
+			rr8_lim[-1] = rr_int
+			
+		rr8[:-1] = rr8[1:] #move values down 1 (ie remove oldest)
+		rr8[-1] = rr_int #insert newest value in last spot in list/array
+		
+		return rr8, rr8_lim
+	
+	def FindRPeaks(self,v_f,t_f,v_i,rr8,tsn_i,tsn_f,delay=175,debug=False):
+		"""
+		Parameters
+		----------
+		
 		
 		
 v = np.genfromtxt('C:\\Users\\Lukas Adamowicz\\Dropbox\\Masters\\Project'+\
@@ -449,4 +477,4 @@ v_d,t_d = test.DerivativeFilter(v_4,t)
 v_s = v_d**2
 v_i,t_i = test.IntegratedAverageFilter(v_s,t_d)
 
-rr_avg,tsn_i,tsn_f = test.FindPeaksLearning(v_4,t,v_i,v_d,debug=True)
+rr8,tsn_i,tsn_f = test.FindPeaksLearning(v_4,t,v_i,v_d,debug=True)
