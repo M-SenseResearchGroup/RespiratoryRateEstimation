@@ -213,6 +213,48 @@ class ECGAnalysis(object):
 			ax.set_ylabel('Voltage [mV]')
 		
 		return data_filt
+	
+	def DerivativeFilter(self,data,time,plot=False):
+		"""
+		Parameters
+		---------
+		data : float ndarray
+			ECG voltage data after steps 1-4 filtering and lead inversion check
+		time : float ndarray
+			ECG sample timings
+		plot : bool
+			Plot resulting data.  Defaults to False
+		
+		Returns
+		-------
+		data_der : float ndarray
+			Derivative of input data
+		time_der : float ndarray
+			Associated timings.  Some cut by derivative operation
+		"""
+		dt = time[1]-time[0] #timestep
+		data_der = (-data[:-4]-2*data[1:-3]+2*data[3:-1]+data[4:])/(8*dt) #derivative
+		
+		if plot==True:
+			f,ax = pl.subplots(figsize=(9,5))
+			ax.plot(time[2:-2],data_der,label='Derivative')
+			ax.legend()
+		
+		return data_der, time[2:-2] #timings are shortened at start and end by 2 samples
+	
+	def _SquaredFilter(self,data):
+		"""
+		Parameters
+		---------
+		data : float ndarray
+			ECG voltage data after derivative filter applied
+		
+		Returns
+		------
+		data_sq : float ndarray
+			Square filter data
+		"""
+		return data**2
 		
 	
 v = np.genfromtxt('C:\\Users\\Lukas Adamowicz\\Dropbox\\Masters\\Project'+\
