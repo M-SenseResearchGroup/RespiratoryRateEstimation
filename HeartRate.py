@@ -154,7 +154,6 @@ class ECGAnalysis(object):
 		"""
 		
 		d2 = data**2 #square data for all positive and prominent peaks
-		mean = np.mean(d2) #obtain mean of squared data
 		d2_max = max(d2) #maximum of squared data
 		d2_max_pks = np.zeros_like(d2) #allocate array for peaks
 		
@@ -180,6 +179,40 @@ class ECGAnalysis(object):
 			return -data, True
 		elif p_neg_pks<0.5:
 			return data, False
+	
+	#Step 4 - Eliminate sub-cardiac frequencies
+	def ElimSubCardiacFreq(self,data,cutoff=0.5,N=4,debug=False):
+		"""
+		Parameters
+		---------
+		data : float ndarray
+			ECG voltage data, correctly oriented and passed through stages 1-3 of filtering
+		cutoff : float, optional
+			Cutoff frequency for high-pass filter.  Defaults to 0.5 Hz (30 BPM)
+		N : int, optional
+			Filter order.  Defaults to 4
+		debug : bool
+			Graph input and output data.  Defaults to False
+		
+		Returns
+		-------
+		data_filt : float ndarray
+			High-pass filtered data
+		"""
+		w_cut = cutoff/self.f_nyq #define cutoff frequency as % of nyq. freq.
+		b,a = signal.butter(N,w_cut,'highpass') #setup high pass filter
+		
+		data_filt = signal.filtfilt(b,a,data) #backwards-forwards filter
+		
+		if debug==True:
+			f,ax = pl.subplots(figsize=(9,5))
+			ax.plot(data,label='initial')
+			ax.plot(data_filt,label='filtered')
+			ax.legend()
+			ax.set_xlabel('Sample No.')
+			ax.set_ylabel('Voltage [mV]')
+		
+		return data_filt
 		
 	
 v = np.genfromtxt('C:\\Users\\Lukas Adamowicz\\Dropbox\\Masters\\Project'+\
@@ -193,4 +226,5 @@ v_1 = test.ElimLowFreq(v,debug=False)
 v_2 = test.ElimVeryHighFreq(v_1,debug=False)
 v_3 = test.ElimMainsFreq(v_2,debug=False)
 v_3c,l_inv = test.CheckLeadInversion(v_3,debug=False)
+v_4 = test.ElimSubCardiacFreq(v_3c,debug=False)
 
