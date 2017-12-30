@@ -10,9 +10,21 @@ import numpy as np
 import matplotlib.pyplot as pl
 from scipy import signal, interpolate
 
+class TSN(object):
+	"""
+	Class for storing Threshold, Signal, Noise values for R-peak detection
+	"""
+	def __init__(self):
+		self.thr = None #threshold
+		self.spk = None #signal peak moving average
+		self.npk = None #noise peak moving average
+
 class ECGAnalysis(object):
 	def __init__(self,fs):
 		"""
+		Class defining steps for analyzing ECG data to obtain an estimation 
+		of Respiratory Rate.
+		
 		Parameters
 		---------
 		fs : float
@@ -25,9 +37,11 @@ class ECGAnalysis(object):
 	#Step 1 - eliminate low frequencies
 	def ElimLowFreq(self,data,cutoff=3,N=1,debug=False):
 		"""
+		Eliminate low frequencies for ECG data.
+		
 		Parameters
 		---------
-		data : ndarray of floats
+		data : ndarray
 			ECG voltage data to filter
 		cutoff : float, optional
 			Cuttoff frequency for filter, -3dB limit.  Defaults to 3Hz
@@ -38,7 +52,7 @@ class ECGAnalysis(object):
 		
 		Returns
 		------
-		data_filt : ndarray of floats
+		data_filt : ndarray
 			High pass filtered data array
 		"""
 		w_cut = cutoff/self.f_nyq #cutoff frequency as percentage of nyquist frequency
@@ -58,9 +72,11 @@ class ECGAnalysis(object):
 	#Step 2 - Eliminate very high frequencies
 	def ElimVeryHighFreq(self,data,cutoff=20,N=1,detrend=True,debug=False):
 		"""
+		Eliminate very high frequencies for ECG data.
+		
 		Parameters
 		---------
-		data : ndarray of floats
+		data : ndarray
 			ECG voltage data after Step 1
 		cutoff : float, optional
 			Cutoff frequency for filter, -3dB limit.  Defaults to 20 Hz
@@ -73,7 +89,7 @@ class ECGAnalysis(object):
 		
 		Returns
 		-------
-		data_filt : ndarray of floats
+		data_filt : ndarray
 			Low-pass filtered data array
 		"""
 		w_cut = cutoff/self.f_nyq #cutoff frequency as percentage of nyquist frequency
@@ -99,6 +115,9 @@ class ECGAnalysis(object):
 	#Step 3 - Eliminate Mains frequency (frequency of electrical signals - 60Hz for US)
 	def ElimMainsFreq(self,data,cutoff=60,Q=10,detrend=True,debug=False):
 		"""
+		Eliminate Mains frequency caused by electronics.
+		60Hz in Americas.  50Hz in Europe.
+		
 		Parameters
 		---------
 		data : float
@@ -114,7 +133,7 @@ class ECGAnalysis(object):
 		
 		Returns
 		-------
-		data_filt : ndarray of floats
+		data_filt : ndarray
 			Notch filtered data
 		"""
 		w0 = cutoff/self.f_nyq
@@ -138,16 +157,19 @@ class ECGAnalysis(object):
 	#Step 3.5 - Lead Inversion Check
 	def CheckLeadInversion(self,data,debug=False):
 		"""
+		Check for lead inversion by examining percentage of local extrema that are negative.
+		R-peaks (maximum local extrema) should be positive.
+		
 		Parameters
 		---------
-		data : ndarray of floats
+		data : ndarray
 			ECG volage data.  Usually after step 3, but can be after import
 		debug : bool, optional
 			Print peak values for debugging.  Defaults to False
 		
 		Returns
 		-------
-		data_check : ndarray of floats
+		data_check : ndarray
 			Correct orientation float of voltage data for ECG signal
 		lead_inv : bool
 			Boolean if leads were inverted.  False if not inverted, True if inverted
@@ -183,9 +205,11 @@ class ECGAnalysis(object):
 	#Step 4 - Eliminate sub-cardiac frequencies
 	def ElimSubCardiacFreq(self,data,cutoff=0.5,N=4,debug=False):
 		"""
+		Eliminate sub-cardiac frequencies (30 BPM - 0.5Hz)
+		
 		Parameters
 		---------
-		data : ndarray of floats
+		data : ndarray
 			ECG voltage data, correctly oriented and passed through stages 1-3 of filtering
 		cutoff : float, optional
 			Cutoff frequency for high-pass filter.  Defaults to 0.5 Hz (30 BPM)
@@ -196,7 +220,7 @@ class ECGAnalysis(object):
 		
 		Returns
 		-------
-		data_filt : ndarray of floats
+		data_filt : ndarray
 			High-pass filtered data
 		"""
 		w_cut = cutoff/self.f_nyq #define cutoff frequency as % of nyq. freq.
@@ -216,20 +240,22 @@ class ECGAnalysis(object):
 	
 	def DerivativeFilter(self,data,time,plot=False):
 		"""
+		Calculated derivative of data.
+		
 		Parameters
 		---------
-		data : ndarray of floats
+		data : ndarray
 			ECG voltage data after steps 1-4 filtering and lead inversion check
-		time : ndarray of floats
+		time : ndarray
 			ECG sample timings
 		plot : bool
 			Plot resulting data.  Defaults to False
 		
 		Returns
 		-------
-		data_der : ndarray of floats
+		data_der : ndarray
 			Derivative of input data
-		time_der : ndarray of floats
+		time_der : ndarray
 			Associated timings.  Some cut by derivative operation
 		"""
 		dt = time[1]-time[0] #timestep
@@ -244,25 +270,29 @@ class ECGAnalysis(object):
 	
 	def _SquaredFilter(self,data):
 		"""
+		Square values of data.
+		
 		Parameters
 		---------
-		data : ndarray of floats
+		data : ndarray
 			ECG voltage data after derivative filter applied
 		
 		Returns
 		------
-		data_sq : ndarray of floats
+		data_sq : ndarray
 			Square filter data
 		"""
 		return data**2
 	
 	def IntegratedAverageFilter(self,data,time,width=150,plot=False):
 		"""
+		Average by integration of data.
+		
 		Parameters
 		---------
-		data : ndarray of floats
+		data : ndarray
 			ECG voltage data after squaring
-		time : ndarray of floats
+		time : ndarray
 			Timings for samples associated with ECG data in seconds
 		width : int, optional
 			Time width (ms) of integration window.  Defaults to 150ms (0.15s)
@@ -271,9 +301,9 @@ class ECGAnalysis(object):
 			
 		Returns
 		-------
-		data_int : ndarray of floats
+		data_int : ndarray
 			Average by integration data
-		time_int : ndarray of floats
+		time_int : ndarray
 			Associated timings, cut by proper amount for integration-average filter
 		"""
 		dt = time[1]-time[0] #timestep
@@ -294,15 +324,17 @@ class ECGAnalysis(object):
 		
 	def FindPeaksLearning(self,v_f,t_f,v_int,v_der,width=150,t_learn=8,delay=175,debug=False):
 		"""
+		Learning function for R-peak detection.
+		
 		Parameters
 		---------
-		v_f : ndarray of floats
+		v_f : ndarray
 			FilteredECG voltage signal (ie after Sub-cardiac freq elimination)
-		t_f : ndarray of floats
+		t_f : ndarray
 			Timings associated with bandpassed ECG signal
-		v_int : ndarray of floats
+		v_int : ndarray
 			Average by integration voltage signal.
-		v_der : ndarray of floats
+		v_der : ndarray
 			Derivative voltage signal
 		width : float, optional
 			Integration window width in milliseconds.  Defaults to 150ms
@@ -315,10 +347,10 @@ class ECGAnalysis(object):
 		-------
 		rr8 : float
 			Initial average R-R peak times
-		thr_int : list of floats
-			Integrated data thresholds and associated values.  3 values
-		thr_fil : list of floats
-			Filtered data thresholds and associated values.  3 values
+		tsn_i : TSN
+			Integrated data thresholds and signal and noise moving averages
+		tsn_f : 
+			Filtered data thresholds and signal and noise moving averages
 		"""
 		dt = t_f[1]-t_f[0]
 		n_dly = int(delay/1000*self.fs) #number of samples corresponding to delay
@@ -398,36 +430,41 @@ class ECGAnalysis(object):
 			rr8[-len(r_t)+1:] = np.array(r_t[1:])-np.array(r_t[:-1])
 		elif len(r_t)>8:
 			rr8 = np.array(r_t[len(r_t)-8:])-np.array(r_t[len(r_t)-9:-1])
-			
-		spk_i = 0.125*vi_pks[np.where(v_f[band_pk]==r_v[0])[0][0]] #initialize signal peak for integrated data
-		npk_i = 0.125*vi_pks[np.where(v_f[band_pk]==t_v[0])[0][0]] #initialize noise peak for integrated data
-		spk_f = 0.125*r_v[0] #initialize signal peak for filtered data
-		npk_f = 0.125*t_v[0] #initialize noise peak for filtered data
+		
+		tsn_i = TSN() #tsn for integrated data
+		tsn_f = TSN() #tsn for filtered data
+		
+		tsn_i.spk = 0.125*vi_pks[np.where(v_f[band_pk]==r_v[0])[0][0]] #initialize signal peak for integrated data
+		tsn_i.npk = 0.125*vi_pks[np.where(v_f[band_pk]==t_v[0])[0][0]] #initialize noise peak for integrated data
+		tsn_f.spk = 0.125*r_v[0] #initialize signal peak for filtered data
+		tsn_f.npk = 0.125*t_v[0] #initialize noise peak for filtered data
 		for i in range(1,len(r_v)):
-			spk_i = 0.125*vi_pks[np.where(v_f[band_pk]==r_v[i])[0][0]] + 0.875*spk_i
-			npk_i = 0.125*vi_pks[np.where(v_f[band_pk]==t_v[0])[0][0]] + 0.875*npk_i
-			spk_f = 0.125*r_v[i] + 0.875*spk_f
-			npk_f = 0.125*t_v[i] + 0.875*npk_f
-			thr_i = npk_i + 0.25*(spk_i-npk_i) #threshold for integrated data
-			thr_f = npk_f + 0.25*(spk_f-npk_f) #threshold for filtered data
+			tsn_i.spk = 0.125*vi_pks[np.where(v_f[band_pk]==r_v[i])[0][0]] + 0.875*tsn_i.spk
+			tsn_i.npk = 0.125*vi_pks[np.where(v_f[band_pk]==t_v[0])[0][0]] + 0.875*tsn_i.npk
+			tsn_f.spk = 0.125*r_v[i] + 0.875*tsn_f.spk
+			tsn_f.npk = 0.125*t_v[i] + 0.875*tsn_f.npk
+			tsn_i.t = tsn_i.npk + 0.25*(tsn_i.spk-tsn_i.npk) #threshold for integrated data
+			tsn_f.t = tsn_f.npk + 0.25*(tsn_f.spk-tsn_f.npk) #threshold for filtered data
 			
 		if debug==True:
 			f,ax = pl.subplots(2,figsize=(9,5),sharex=True)
 			ax[0].plot(t_f,v_int)
 			ax[0].plot(ti_pks,vi_pks,'o')
 			ax[0].plot(t_f[pki_h],v_int[pki_h],'o')
-			ax[0].axhline(thr_i,linestyle='--',color='k')
+			ax[0].axhline(tsn_i.t,linestyle='--',color='k')
 			ax[1].plot(t_f,v_f)
 			ax[1].plot(r_t,r_v,'ro')
 			ax[1].plot(t_t,t_v,'go')
-			ax[1].axhline(thr_f,linestyle='--',color='k')
+			ax[1].axhline(tsn_f.t,linestyle='--',color='k')
 			pl.tight_layout()
 			
-		return rr8, [thr_i,spk_i,npk_i], [thr_f,spk_f,npk_f]
+		return rr8, tsn_i, tsn_f
 	
 	@staticmethod
 	def _UpdateAvgRR(rr_int,rr8,rr8_lim):
 		"""
+		Update R-R 8 value storage arrays for R-peak detection
+		
 		Parameters
 		---------
 		rr_int : float
@@ -454,77 +491,62 @@ class ECGAnalysis(object):
 		return rr8, rr8_lim
 	
 	@staticmethod
-	def _UpdateThresholds(i_peak,f_peak,thr_i,spk_i,npk_i,thr_f,spk_f,npk_f,signal=True):
+	def _UpdateThresholds(i_peak,f_peak,tsn_i,tsn_f,signal=True):
 		"""
+		Update thresholds for R-peak detection
+		
 		Parameters
 		----------
 		i_peak : float
 			Integrated signal peak
 		f_peak : float
 			Filtered signal peak
-		thr_i : float
-			Integrated data threshold
-		spk_i : float
-			Integrated data signal peak modifier
-		npk_i : float
-			Integrated data noise peak modifier
-		thr_f : float
-			Filtered data threshold
-		spk_f : float
-			Filtered data signal peak modifier
-		spk_f : float
-			Filtered data noise peak modifier
+		tsn_i : TSN
+			Threshold, signal and noise moving averages for integrated data
+		tsn_f : TSN
+			Threshold, signal and noise moving averages for integrated data
 		signal : bool
 			Is the peak data provided a signal(True) or noise(False) peak.  Defaults to True
 			
 		Returns
 		-------
-		thr_i : float
-			Updated integrated data threshold
-		spk_i : float
-			Updated integrated data signal peak modifier
-		npk_i : float
-			Updated integrated data noise peak modifier
-		thr_f : float
-			Updated filtered data threshold
-		spk_f : float
-			Updated filtered data signal peak modifier
-		npk_i :float
-			Updated filtered data noise peak modifier
+		tsn_i : TSN
+			Updated threshold, signal and noise moving averages for integrated data
+		tsn_f : TSN
+			Updated threshold, signal and noise moving averages for integrated data
 		"""
 		if signal==True:
-			spk_i = 0.125*i_peak + 0.875*spk_i #update integrated signal peak value
-			spk_f = 0.125*f_peak + 0.875*spk_f #update filtered signal peak value
-			thr_i = npk_i + 0.25*(spk_i-npk_i) #update integrated signal threshold
-			thr_f = npk_f + 0.25*(spk_f-npk_f) #update filtered signal threshold
+			tsn_i.spk = 0.125*i_peak + 0.875*tsn_i.spk #update integrated signal peak value
+			tsn_f.spk = 0.125*f_peak + 0.875*tsn_f.spk #update filtered signal peak value
 		elif signal==False:
-			npk_i = 0.125*i_peak+ 0.875*spk_i #update integrated noise peak value
-			npk_f = 0.125*f_peak + 0.875*spk_f #update filtered noise peak value
-			thr_i = npk_i + 0.25*(spk_i-npk_i) #update integrated signal threshold
-			thr_f = npk_f + 0.25*(spk_f-npk_f) #update filtered signal threshold
+			tsn_i.npk = 0.125*i_peak+ 0.875*tsn_i.npk #update integrated noise peak value
+			tsn_f.npk = 0.125*f_peak + 0.875*tsn_f.npk #update filtered noise peak value
+
+		tsn_i.t = tsn_i.npk + 0.25*(tsn_i.spk-tsn_i.npk) #update integrated signal threshold
+		tsn_f.t = tsn_f.npk + 0.25*(tsn_f.spk-tsn_f.npk) #update filtered signal threshold
 		
-		return thr_i,spk_i,npk_i,thr_f,spk_f,npk_f
+		return tsn_i,tsn_f
 	
 	def FindRPeaks(self,v_f,t_f,v_i,v_d,rr8,tsn_i,tsn_f,width=150,delay=175,debug=False):
 		"""
-		Algorithm implementation of Hamilton and Tompkins, 1986.  
+		Algorithm implementation to find R-peaks in ECG of Hamilton and Tompkins, 1986.  
 		"Quantitative Investigation of QRS Detection Rules Using the MIT/BIH Arrhythmia Database"
 		
 		Parameters
 		----------
-		v_f : ndarray of floats
+		v_f : ndarray
 			Filtered ECG data
-		t_f : ndarray of floats
+		t_f : ndarray
 			Timings associated with filtered ecg data
-		v_i : ndarray of floats
+		v_i : ndarray
 			Integrated average data
-		v_d : ndarray of floats
+		v_d : ndarray
 			Derivative signal data
 		rr8 : list of floats
 			List/array of R-R timings from the FindPeaksLearning function output
-		tsn_i : list of floats
+		tsn_i : TSN
 			Threshold, signal, noise peak values for integrated data from FindPeaksLearning output
-		tsn_f : list of floats
+		tsn_f : TSN
 			Threshold, signal, noise peak values for filtered data from FindPeaksLearning output
 		width : float, optional
 			TIme (ms) of integration window for integration step.  Defaults to 150ms
@@ -534,14 +556,11 @@ class ECGAnalysis(object):
 		
 		Returns
 		-------
-		r_pks : ndarray of floats
+		r_pks : ndarray
 			N-by-2 array of [r-peak voltage,r-peak timestamp]
-		q_trs : ndarray of floats
+		q_trs : ndarray
 			N-by-2 array of [q-trough voltage, q-trough timestamp]
 		"""
-		#unpack TSN values
-		thr_i,spk_i,npk_i = tsn_i
-		thr_f,spk_f,npk_f = tsn_f
 		
 		v_d = np.append(v_d,[0,0])
 		v_d = np.append([0,0],v_d)
@@ -564,7 +583,6 @@ class ECGAnalysis(object):
 		r_pks = np.zeros((1,2)) #initialize vector for R peak values and timestamps
 		
 		for i in range(len(vi_pts)):
-			print(vi_pts[i])
 			#finding maximum slope in the +- width surrounding each peak
 			if vi_pts[i]-nw > 0 and vi_pts[i]+nw<len(v_i): #if +- window is fully in data range
 				m_pos[i+1] = [max(v_d[vi_pts[i]-nw:vi_pts[i]+nw])+int(vi_pts[i]-nw),\
@@ -590,28 +608,24 @@ class ECGAnalysis(object):
 				
 			#Determine type of peak (R,T, etc)
 			#if the peaks are above the thresholds and time between is greater than 0.36s		
-			if v_i[vi_pts[i]] > thr_i and vf_pks[i,0] > thr_f and (t_f[int(vf_pks[i,1])]-r_pks[-1,1])>=0.36:
+			if v_i[vi_pts[i]] > tsn_i.t and vf_pks[i,0] > tsn_f.t and (t_f[int(vf_pks[i,1])]-r_pks[-1,1])>=0.36:
 				r_pks = np.append(r_pks,[[vf_pks[i,0],t_f[int(vf_pks[i,1])]]],axis=0)
 				j = i+1 #assign key value.  This is the index of the last detected r_peak (for indexing last r-peak maximum slope)
-				thr_i,spk_i,npk_i,thr_f,spk_f,npk_f = self._UpdateThresholds(v_i[vi_pts[i]],r_pks[-1,0],\
-																 thr_i,spk_i,npk_i,thr_f,spk_f,npk_f,signal=True)
+				tsn_i,tsn_f = self._UpdateThresholds(v_i[vi_pts[i]],r_pks[-1,0],tsn_i,tsn_f,signal=True)
 			
 			#peaks above thresholds, time between is greater than 0.2s but less than 0.36s
-			elif v_i[vi_pts[i]] > thr_i and vf_pks[i,0] > thr_f and (t_f[vf_pks[i,1]]-r_pks[-1,1])>0.2:
+			elif v_i[vi_pts[i]] > tsn_i.t and vf_pks[i,0] > tsn_f.t and (t_f[vf_pks[i,1]]-r_pks[-1,1])>0.2:
 				#if the maximum associated slope is greater than half the previous detected R wave
 				if m_pos[i+1,0] > 0.5*m_pos[j,0]: #it is a R peak
 					r_pks = np.append(r_pks,[vf_pks[i,0],t_f[v_f[i,1]]],axis=0)
 					j = i+1
-					thr_i,spk_i,npk_i,thr_f,spk_f,npk_f = self._UpdateThresholds(v_i[vi_pts[i]],r_pks[-1,0],\
-																  thr_i,spk_i,npk_i,thr_f,spk_f,npk_f,signal=True)
+					tsn_i,tsn_f = self._UpdateThresholds(v_i[vi_pts[i]],r_pks[-1,0],tsn_i,tsn_f,signal=True)
 				else: #it is a peak
-					thr_i,spk_i,npk_i,thr_f,spk_f,npk_f = self._UpdateThresholds(v_i[vi_pts[i]],r_pks[-1,0],\
-																  thr_i,spk_i,npk_i,thr_f,spk_f,npk_f,signal=False)
+					tsn_i,tsn_f = self._UpdateThresholds(v_i[vi_pts[i]],v_f[vi_pts[i]],tsn_i,tsn_f,signal=False)
 			
 			else: #if not above the thresholds it is a noise peak
-				thr_i,spk_i,npk_i,thr_f,spk_f,npk_f = self._UpdateThresholds(v_i[vi_pts[i]],r_pks[-1,0],\
-																  thr_i,spk_i,npk_i,thr_f,spk_f,npk_f,signal=False)
-			
+				tsn_i,tsn_f = self._UpdateThresholds(v_i[vi_pts[i]],v_f[vi_pts[i]],tsn_i,tsn_f,signal=False)
+
 			##########################################################################
 			#     Missing check for missing r-peaks by looking at peaks between      #
 			#     consecutive R-peaks that the time between is greater than          #
@@ -646,6 +660,63 @@ class ECGAnalysis(object):
 			f.subplots_adjust(hspace=0)
 		
 		return r_pks,q_trs
+	
+	def RespRateExtraction(self,r_pks,q_trs):
+		"""
+		Compute parameters for respiratory rate estimation.
+		
+		Parameters
+		---------
+		r_pks : ndarray
+			N-by-2 array of [R-peak voltage, R-peak timestamp]
+		q_trs : ndarray
+			N-by-2 array of [Q-trough voltage, Q-trough timestamp]
+		
+		Returns
+		-------
+		bw : ndarray
+			Array of N voltages.  Mean of associated troughs and peaks
+		am : ndarray
+			Array of N voltages.  Difference between associated troughs and peaks
+		fm : ndarray
+			Array of N-1 voltages.  Difference in time between consecutive R-peaks
+		t_fm : ndarray
+			Array of N-1 times associated with 'fm' values
+		"""
+		bw = np.mean([r_pks[:,0],q_trs[:,0]],axis=0) #X_b1 from Charlton paper
+		am = r_pks[:,0]-q_trs[:,0] #X_b2
+		fm = r_pks[1:,1]-r_pks[:-1,1] #X_b3
+		t_fm = (r_pks[1:,1]+r_pks[:-1,1])/2
+		
+		return bw, am, fm, t_fm
+	
+	def FMSplineInterpolate(self,fm,t_fm):
+		"""
+		Spline Interpolation of frequency modulated data
+		
+		Parameters
+		---------
+		fm : ndarray
+			Array of N-1 voltages.  Difference in time between consecutive R-peaks
+		t_fm : ndarray
+			Array of N-1 times associated with 'fm' values
+		
+		Returns
+		-------
+		xs : ndarray
+			Array of x-values for computed spline
+		ys : ndarray
+			Array of y-values for computed spline
+		"""
+		cs = interpolate.CubicSpline(t_fm,fm) #setup spline function
+		xs = np.arange(t_fm[0],t_fm[-1],0.2) #setup x values.  0.2s intervals
+		
+		#if x-values don't include end time, add it to the array
+		if xs[-1] != t_fm[-1]:
+			xs = np.append(xs,t_fm[-1])
+		
+		return xs, cs(xs) #xy, ys
+		
 
 v = np.genfromtxt('C:\\Users\\Lukas Adamowicz\\Dropbox\\Masters\\Project'+\
 				  '\\RespiratoryRate_HeartRate\\Python RRest\\sample_ecg.csv',\
@@ -664,6 +735,8 @@ v_d,t_d = test.DerivativeFilter(v_4,t)
 v_s = v_d**2
 v_i,t_i = test.IntegratedAverageFilter(v_s,t_d)
 
-rr8,tsn_i,tsn_f = test.FindPeaksLearning(v_4,t,v_i,v_d,debug=True)
+rr8,tsn_i,tsn_f = test.FindPeaksLearning(v_4,t,v_i,v_d,debug=False)
 
-r_pk,q_tr = test.FindRPeaks(v_4,t,v_i,v_d,rr8,tsn_i,tsn_f,debug=True)
+r_pk,q_tr = test.FindRPeaks(v_4,t,v_i,v_d,rr8,tsn_i,tsn_f,debug=False)
+bw,am,fm,fmt = test.RespRateExtraction(r_pk,q_tr)
+fmts,fms = test.FMSplineInterpolate(fm,fmt)
