@@ -746,6 +746,52 @@ class ECGAnalysis(object):
 			xs = np.append(xs,t_fm[-1])
 		
 		return xs, cs(xs) #xy, ys
+	
+	def CountOriginal(self,data,t,debug=False):
+		"""
+		Implementation of Original Count Method from 
+		Axel Schafer, Karl Kratky.  "Estimation of Breathing Rate from Respiratory
+		Sinus Arrhythmia: Comparison of Various Methods."  Ann. of Biomed. Engr.
+		Vol 36 No 3, 2008.
+		
+		Parameters
+		----------
+		data : ndarray
+			Array of data of interest.  Originally used for R-R interval timings.
+		t : ndarray
+			Timings for data of interest
+			
+		Returns
+		------
+		"""
+		#step 1 - bandpass filter with pass region between 0.1-0.5Hz
+		fs = 1/(t[1]-t[0]) #spline data frequency
+		wl = 0.1/(0.5*fs) #low cutoff frequency as % of nyquist frequency
+		wh = 0.5/(0.5*fs) #high cutoff freq as % of nyquist freq
+		b,a = signal.butter(10,[wl,wh],'bandpass')
+		
+#		data -= np.mean(data)
+		df = signal.filtfilt(b,a,data) #apply filter to input data
+#		df -= np.mean(df) #remove mean from filtered data
+		
+		#step 2 - find local minima and maxima of filtered data
+		# get 3rd quartile, threshold is Q3*0.2
+		minpt = signal.argrelmin(df)[0]
+		maxpt = signal.argrelmax(df)[0]
+		
+		q3 = np.percentile(df[maxpt],75) #3rd quartile (75th percentile)
+		thr = 0.2*q3 #threshold
+		print(thr)
+		
+		if debug==True:
+			f,ax = pl.subplots(figsize=(9,5))
+			ax.plot(t,data,label='initial')
+			ax.plot(t,df,label='filtered')
+			ax.plot(t[minpt],df[minpt],'o')
+			ax.plot(t[maxpt],df[maxpt],'o')
+			ax.axhline(thr)
+			ax.legend()
+			
 		
 
 v = np.genfromtxt('C:\\Users\\Lukas Adamowicz\\Dropbox\\Masters\\Project'+\
@@ -770,3 +816,4 @@ rr8,tsn_i,tsn_f = test.FindPeaksLearning(v_4,t,v_i,v_d,debug=False)
 r_pk,q_tr = test.FindRPeaks(v_4,t,v_i,v_d,rr8,tsn_i,tsn_f,debug=False)
 bw,am,fm,fmt = test.RespRateExtraction(r_pk,q_tr)
 fmts,fms = test.FMSplineInterpolate(fm,fmt)
+test.CountOriginal(fms,fmts,debug=True)
