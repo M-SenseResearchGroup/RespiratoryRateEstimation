@@ -607,9 +607,9 @@ class ECGAnalysis(object):
 			if vi_pts[i]-nw > 0 and vi_pts[i]+nw<len(v_i): #if +- window is fully in data range
 				m_pos[i+1] = [max(v_d[vi_pts[i]-nw:vi_pts[i]+nw])+int(vi_pts[i]-nw),\
 								 np.argmax(v_d[vi_pts[i]-nw:vi_pts[i]+nw])+int(vi_pts[i]-nw)]
-			elif vi_pts-nw < 0: #if the window goes before data range
+			elif vi_pts[i]-nw < 0: #if the window goes before data range
 				m_pos[i+1] = [max(v_d[0:vi_pts[i]+nw]),np.argmax(v_d[0:vi_pts[i]+nw])]
-			elif vi_pts+nw > len(v_i): #if the window goes outside end of data range
+			elif vi_pts[i]+nw > len(v_i): #if the window goes outside end of data range
 				m_pos[i+1] = [max(v_d[vi_pts[i]-nw:]),np.argmax(v_d[vi_pts[i]-nw:])]
 			
 			#finding descending half peak value
@@ -681,7 +681,10 @@ class ECGAnalysis(object):
 			ax[0].legend(loc='best')
 			
 			ax[1].plot(t_f,v_i,label='integrated')
-			ax[1].plot(t_f[vi_hpt],v_i[vi_hpt],'ko')
+			try:
+				ax[1].plot(t_f[vi_hpt],v_i[vi_hpt],'ko')
+			except:
+				ax[1].plot(t_f[vi_hpt[:-1]],v_i[vi_hpt[:-1]],'ko')
 			ax[1].plot(t_f[vi_pts],v_i[vi_pts],'ro')
 			ax[1].legend(loc='best')
 			ax[1].set_xlabel('Time [s]')
@@ -720,7 +723,7 @@ class ECGAnalysis(object):
 		
 		return bw, am, fm, t_fm
 	
-	def FMSplineInterpolate(self,fm,t_fm):
+	def FMSplineInterpolate(self,fm,t_fm,debug=False):
 		"""
 		Spline Interpolation of frequency modulated data
 		
@@ -744,6 +747,12 @@ class ECGAnalysis(object):
 		#if x-values don't include end time, add it to the array
 		if xs[-1] != t_fm[-1]:
 			xs = np.append(xs,t_fm[-1])
+			
+		if debug==True:
+			pl.figure()
+			pl.plot(t_fm,fm,'o',label='fm values')
+			pl.plot(xs,cs(xs),label='spline')
+			pl.legend()
 		
 		return xs, cs(xs) #xy, ys
 	
@@ -763,16 +772,18 @@ class ECGAnalysis(object):
 			
 		Returns
 		------
+		rr : ndarray
+			N-by-2 array of respiration frequencies (Beats per sec) and timings
 		"""
 		#step 1 - bandpass filter with pass region between 0.1-0.5Hz
 		fs = 1/(t[1]-t[0]) #spline data frequency
 		wl = 0.1/(0.5*fs) #low cutoff frequency as % of nyquist frequency
 		wh = 0.5/(0.5*fs) #high cutoff freq as % of nyquist freq
-		b,a = signal.butter(10,[wl,wh],'bandpass')
 		
-#		data -= np.mean(data)
+		b,a = signal.butter(5,[wl,wh],'bandpass') #filtfilt, -> order is 2x given
+		
+		data -= np.mean(data) #remove mean from data
 		df = signal.filtfilt(b,a,data) #apply filter to input data
-#		df -= np.mean(df) #remove mean from filtered data
 		
 		#step 2 - find local minima and maxima of filtered data
 		# get 3rd quartile, threshold is Q3*0.2
@@ -781,24 +792,66 @@ class ECGAnalysis(object):
 		
 		q3 = np.percentile(df[maxpt],75) #3rd quartile (75th percentile)
 		thr = 0.2*q3 #threshold
-		print(thr)
 		
+		#step 3 - valid breath cycle is max>thr, min<0,max>thr with no max/min in between
+		#local extrema sorted by index
+		#local max T/F.  True=>maximum, False=>minimum
+		ext,etp = zip(*sorted(zip(np.append(maxpt,minpt),\
+										[True]*len(maxpt)+[False]*len(minpt))))
+		ext,etp = np.array(ext),np.array(etp)
+		
+		brth_cyc = [] #initialize breath cycle array
+		rr = np.zeros((1,2)) #initialize respiratory rate array
+		
+		for i in range(len(ext)-2):
+			if etp[i]==True and etp[i+2]==True and etp[i+1]==False:
+				if df[ext[i]]>thr and df[ext[i+2]]>thr and df[ext[i+1]]<0:
+					brth_cyc.append([ext[i],ext[i+2]])
+					rr = np.append(rr,[[1/(t[ext[i+2]]-t[ext[i]]),t[ext[i+1]]]],axis=0)
+		rr = rr[1:,:]			
+		print(rr)
 		if debug==True:
 			f,ax = pl.subplots(figsize=(9,5))
-			ax.plot(t,data,label='initial')
-			ax.plot(t,df,label='filtered')
-			ax.plot(t[minpt],df[minpt],'o')
+			ax.plot(t,data,'k--',alpha=0.5,label='initial')
+			ax.plot(t,df,'b',label='filtered')
+			ax.plot(t[minpt],df[minpt],'*')
 			ax.plot(t[maxpt],df[maxpt],'o')
 			ax.axhline(thr)
+			for st,sp in brth_cyc:
+				ax.plot(t[st:sp],df[st:sp],'r',linewidth=2,alpha=0.5)
+			ax.plot(rr[:,1],rr[:,0],'+',label='Resp Rate')
 			ax.legend()
-			
 		
+		return rr
+	
+	def CoutAdv(self,data,t,debug=False):
+		"""
+		Implementation of Advanced Count Method from 
+		Axel Schafer, Karl Kratky.  "Estimation of Breathing Rate from Respiratory
+		Sinus Arrhythmia: Comparison of Various Methods."  Ann. of Biomed. Engr.
+		Vol 36 No 3, 2008.
+		
+		Parameters
+		----------
+		data : ndarray
+			Array of data of interest.  Originally used for R-R interval timings.
+		t : ndarray
+			Timings for data of interest
+			
+		Returns
+		------
+		rr : ndarray
+			N-by-2 array of respiration frequencies (Beats per sec) and timings
+		"""
 
-v = np.genfromtxt('C:\\Users\\Lukas Adamowicz\\Dropbox\\Masters\\Project'+\
+t,v = np.genfromtxt('C:\\Users\\Lukas Adamowicz\\Dropbox\\Masters\\Project'+\
 				  '\\RespiratoryRate_HeartRate\\Python RRest\\sample_ecg.csv',\
 				  skip_header=0,unpack=True,delimiter=',')
-v = v[250:]
-t = np.array([1/500*i for i in range(len(v))])
+t -= t[0]
+t /= 1000
+
+#v,t = v[250:int(len(v)/24)],t[250:int(len(v)/24)]
+v,t = v[250:20000],t[250:20000]
 
 test = ECGAnalysis(500)
 v_1 = test.ElimLowFreq(v,debug=False)
@@ -815,5 +868,5 @@ rr8,tsn_i,tsn_f = test.FindPeaksLearning(v_4,t,v_i,v_d,debug=False)
 
 r_pk,q_tr = test.FindRPeaks(v_4,t,v_i,v_d,rr8,tsn_i,tsn_f,debug=False)
 bw,am,fm,fmt = test.RespRateExtraction(r_pk,q_tr)
-fmts,fms = test.FMSplineInterpolate(fm,fmt)
-test.CountOriginal(fms,fmts,debug=True)
+fmts,fms = test.FMSplineInterpolate(fm,fmt,debug=False)
+RR = test.CountOriginal(fms,fmts,debug=True)
