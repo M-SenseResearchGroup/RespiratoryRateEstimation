@@ -809,22 +809,29 @@ class ECGAnalysis(object):
 					brth_cyc.append([ext[i],ext[i+2]])
 					rr = np.append(rr,[[1/(t[ext[i+2]]-t[ext[i]]),t[ext[i+1]]]],axis=0)
 		rr = rr[1:,:]			
-		print(rr)
+		
 		if debug==True:
-			f,ax = pl.subplots(figsize=(9,5))
-			ax.plot(t,data,'k--',alpha=0.5,label='initial')
-			ax.plot(t,df,'b',label='filtered')
-			ax.plot(t[minpt],df[minpt],'*')
-			ax.plot(t[maxpt],df[maxpt],'o')
-			ax.axhline(thr)
+			f,ax = pl.subplots(2,figsize=(9,5),sharex=True)
+			ax[0].plot(t,data,'k--',alpha=0.5,label='initial')
+			ax[0].plot(t,df,'b',label='filtered')
+			ax[0].plot(t[minpt],df[minpt],'*')
+			ax[0].plot(t[maxpt],df[maxpt],'o')
+			ax[0].axhline(thr)
 			for st,sp in brth_cyc:
-				ax.plot(t[st:sp],df[st:sp],'r',linewidth=2,alpha=0.5)
-			ax.plot(rr[:,1],rr[:,0],'+',label='Resp Rate')
-			ax.legend()
+				ax[0].plot(t[st:sp],df[st:sp],'r',linewidth=2,alpha=0.5)
+			ax[1].plot(rr[:,1],rr[:,0]*60,'+')
+			ax[0].legend()
+			
+			ax[1].set_xlabel('Time [s]')
+			ax[1].set_ylabel('Resp. Rate [BPM]')
+			ax[0].set_ylabel('R-R peak times [s]')
+			
+			f.tight_layout()
+			f.subplots_adjust(hspace=0)
 		
 		return rr
 	
-	def CoutAdv(self,data,t,debug=False):
+	def CountAdv(self,data,t,debug=False):
 		"""
 		Implementation of Advanced Count Method from 
 		Axel Schafer, Karl Kratky.  "Estimation of Breathing Rate from Respiratory
@@ -843,6 +850,93 @@ class ECGAnalysis(object):
 		rr : ndarray
 			N-by-2 array of respiration frequencies (Beats per sec) and timings
 		"""
+		
+		#step 1 - bandpass filter with pass region between 0.1-0.5Hz
+		fs = 1/(t[1]-t[0]) #spline data frequency
+		wl = 0.1/(0.5*fs) #low cutoff frequency as % of nyquist frequency
+		wh = 0.5/(0.5*fs) #high cutoff freq as % of nyquist freq
+		
+		b,a = signal.butter(5,[wl,wh],'bandpass') #filtfilt, -> order is 2x given
+		
+		data -= np.mean(data) #remove mean from data
+		df = signal.filtfilt(b,a,data) #apply filter to input data
+		
+		#step 2 - find local minima and maxima of filtered data
+		# get 3rd quartile, threshold is Q3*0.2
+		minpt = signal.argrelmin(df)[0]
+		maxpt = signal.argrelmax(df)[0]
+		
+		#step 3 - calculate absolute value diff. between subsequent local extrema
+		# 3rd quartile of differences, threshold = 0.1*Q3
+		ext,etp = zip(*sorted(zip(np.append(maxpt,minpt),\
+										[True]*len(maxpt)+[False]*len(minpt))))
+		ext,etp = np.array(ext),np.array(etp)
+		
+		ext_diff = np.zeros(len(ext)-1)
+		for i in range(len(ext)-1):
+			if etp[i] != etp[i+1]: #ie min followed by max or max followed by min
+				ext_diff[i] = abs(df[ext[i]]-df[ext[i+1]])
+				
+		thr = 0.1*np.percentile(ext_diff,75) #threshold value
+		
+		if debug==True:
+			f,ax = pl.subplots(2,figsize=(9,5),sharex=True)
+			ax[0].plot(t,df)
+			ax[0].plot(t[minpt],df[minpt],'k+')
+			ax[0].plot(t[maxpt],df[maxpt],'k+')
+		
+		rem = 0 #removed indices counter
+		#step 4 - remove any sets whose difference is less than the threshold
+		for i in range(len(ext)-1):
+#			if ext_diff[i]<thr:
+#				ext[i],ext[i+1] = -1,-1 #set to negative index for easy removal later
+			if etp[i-rem] != etp[i-rem+1] and abs(df[ext[i-rem]]-df[ext[i-rem+1]])<thr:
+				ext = np.delete(ext,[i-rem,i-rem+1])
+				etp = np.delete(etp,[i-rem,i-rem+1])
+				rem += 2
+				
+#		etp = etp[np.argwhere(ext!=-1)].flatten() #remove sets less than threshold
+#		ext = ext[np.argwhere(ext!=-1)].flatten()
+		
+		#step 5 - breath cycles are now minimum -> maximum -> minimum = 1 cycle
+		brth_cyc = [] #initialize breath cycle array
+		#rr = np.zeros((1,2)) #initialize array for respiratory rate and timings
+		
+		#############################################################
+		#   	                 YES/NO?                              #
+		#############################################################
+		brth_cyc_xnx = [] #try maX-miN-maX cycles to see if more than min-max-min
+		
+		for i in range(len(ext)-2):
+			if etp[i]==False and etp[i+1]==True and etp[i+2]==False:
+				brth_cyc.append([ext[i],ext[i+2]])
+			elif etp[i]==True and etp[i+1]==False and etp[i+2]==True:
+				brth_cyc_xnx.append([ext[i],ext[i+2]])
+				
+		rr = np.zeros((max([len(brth_cyc),len(brth_cyc_xnx)]),2))
+		
+		if len(brth_cyc)<len(brth_cyc_xnx):
+			brth_cyc = brth_cyc_xnx
+			
+		for i in range(len(rr[:,0])):
+			rr[i] = [1/(t[brth_cyc[i][1]]-t[brth_cyc[i][0]]),\
+						 (t[brth_cyc[i][1]]+t[brth_cyc[i][0]])/2]
+		
+		if debug==True:
+			ax[0].plot(t[ext],df[ext],'ro',alpha=0.5,markersize=0.5)
+			
+			for st,sp in brth_cyc:
+				ax[0].plot(t[st:sp],df[st:sp],'r',alpha=0.25,linewidth=5)
+			
+			ax[1].plot(rr[:,1],rr[:,0]*60,'+',markersize=10)
+			ax[1].set_ylabel('Breath Frequency [BPM]')
+			ax[0].set_ylabel('R-R peak time [s]')
+			ax[1].set_xlabel('Time [s]')
+			
+			f.tight_layout()
+			f.subplots_adjust(hspace=0)
+		
+		return rr
 
 t,v = np.genfromtxt('C:\\Users\\Lukas Adamowicz\\Dropbox\\Masters\\Project'+\
 				  '\\RespiratoryRate_HeartRate\\Python RRest\\sample_ecg.csv',\
@@ -850,8 +944,8 @@ t,v = np.genfromtxt('C:\\Users\\Lukas Adamowicz\\Dropbox\\Masters\\Project'+\
 t -= t[0]
 t /= 1000
 
-#v,t = v[250:int(len(v)/24)],t[250:int(len(v)/24)]
-v,t = v[250:20000],t[250:20000]
+v,t = v[250:int(len(v)/6)],t[250:int(len(v)/6)]
+#v,t = v[250:20000],t[250:20000]
 
 test = ECGAnalysis(500)
 v_1 = test.ElimLowFreq(v,debug=False)
@@ -869,4 +963,5 @@ rr8,tsn_i,tsn_f = test.FindPeaksLearning(v_4,t,v_i,v_d,debug=False)
 r_pk,q_tr = test.FindRPeaks(v_4,t,v_i,v_d,rr8,tsn_i,tsn_f,debug=False)
 bw,am,fm,fmt = test.RespRateExtraction(r_pk,q_tr)
 fmts,fms = test.FMSplineInterpolate(fm,fmt,debug=False)
-RR = test.CountOriginal(fms,fmts,debug=True)
+RR = test.CountOriginal(fms,fmts,debug=False)
+RR_adv = test.CountAdv(fms,fmts,debug=False)
