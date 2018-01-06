@@ -20,7 +20,8 @@ class TSN(object):
 		self.npk = None #noise peak moving average
 
 class ECGAnalysis(object):
-	def __init__(self,fs):
+	def __init__(self,fs,v,t,low_cut=3,low_N=1,vh_cut=20,vh_N=1,main_cut=60,main_Q=10,\
+			  sc_cut=0.5,sc_N=4,int_avg_width=150,t_learn=8,delay=175):
 		"""
 		Class defining steps for analyzing ECG data to obtain an estimation 
 		of Respiratory Rate.
@@ -28,154 +29,184 @@ class ECGAnalysis(object):
 		Parameters
 		---------
 		fs : float
-			Sampling frequency of input data
+			Sampling frequency [Hz] of input data
+		v : ndarray
+			Voltage [V, mV] signal from ECG Lead II
+		t : ndarray
+			Timestamps [s] for voltage signal
+		low_cut : float, int, optional
+			High-pass filter -3 dB cutoff for eliminating low frequencies.  Defaults to 3 Hz
+		low_N : int, optional
+			High-pass filter order divided by 2, since forwards-backwards filter.  
+			Defaults to 1
+		vh_cut : float, int, optional
+			Low-pass filter -3 dB cutoff for eliminating very high frequencies.  
+			Defaults to 20 Hz
+		vh_N : int, optional
+			Low-pass filter order divided by 2, Defaulst to 1
+		main_cut : float, int, optional
+			Cutoff for mains frequency elimination (electrical signals).  60 Hz in US
+			50 Hz in Europe.  Defaults to 60 Hz
+		main_Q : int, optional
+			Quality of filter for mains elimination.  Defaults to 10
+		sc_cut : float, int, optional
+			Sub-cardiac frequency elimination -3 dB cutoff.  Defaults to 0.5 Hz
+		sc_N : int, optional
+			Sub-cardiac high-pass frequency order divided by 2.  Defaults to 4
+		int_avg_width : int, optional
+			Average by integration window width in milliseconds [ms].  Defaults to 150
+		t_learn : float, int
+			Time [s] for threshold learning for R-peak detection.  Defaults to 8s
+		delay : float, int
+			Time [ms] for descending half-peak not being found and setting descending
+			half-peak time.  Defaults to 175ms
 		"""
 		
 		self.fs = fs
 		self.f_nyq = 0.5*self.fs #nyquist frequency is half sampling frequency
+		self.v = v
+		self.t = t
+		self.lcut = low_cut
+		self.lN = low_N
+		self.vhcut = vh_cut
+		self.vhN = vh_N
+		self.mcut = main_cut
+		self.mQ = main_Q
+		self.sccut = sc_cut
+		self.scN = sc_N
+		self.iaw = int_avg_width
+		self.tlearn = t_learn
+		self.delay = delay
 	
+	def FilterData(self):
+		"""
+		Perform all filtering steps in ECG data analysis
+		"""
+		
+		self.ElimLowFreq() #Eliminate Low Frequencies
+		self.ElimVeryHighFreq() #Eliminate High Frequencies
+		self.ElimMainsFreq() #Eliminate Mains frequency
+		self.CheckLeadInversion() #check for lead inversion
+		self.ElimSubCardiacFreq() #Eliminate sub-cardiac frequencies
+		
+		self.DerivativeFilter() #Take derivative and square it of filtered data
+		self.IntegratedAverageFilter() #Average by integration of squared derivative data
+	
+	def DetectRPeaks(self):
+		"""
+		Perform all steps in detecting R-peaks, and determining ECG HR parameters:
+		Bandwidth modulation, Amplitude modulation, Frequency modulation.
+		"""
+		
+		self.FindPeaksLearning() #learning phase for finding R-peaks
+		self.FindRPeaks(debug=True) #find R-peaks
+		self.RespRateExtraction() #extract AM,FM,BW parameters from R-peak values
+		
+		self.fms = ECGAnalysis.SplineInterpolate(self.fm) #FM spline
+		self.ams = ECGAnalysis.SplineInterpolate(self.am) #AM spline
+		self.bws = ECGAnalysis.SplineInterpolate(self.bw) #BW spline
+	
+	def EstimateRespRate(self):
+		"""
+		Perform all steps for respiratory rate estimation.  Currently uses Advanced 
+		Count method to obtain data for whole time sequence.
+		"""
+		
+		self.rr_am = ECGAnalysis.CountAdv(self.ams,debug=True) #RR from AM parameter
+		self.rr_fm = ECGAnalysis.CountAdv(self.fms,debug=True) #RR from FM parameter
+		self.rr_bw = ECGAnalysis.CountAdv(self.bws,debug=True) #RR from BW parameter
+		
+		#Fuse estimates together
+		self.rr_est = ECGAnalysis.SmartModulationFusion(self.rr_bw,self.rr_am,self.rr_fm)
+		
 	#Step 1 - eliminate low frequencies
-	def ElimLowFreq(self,data,cutoff=3,N=1,debug=False):
+	def ElimLowFreq(self,debug=False):
 		"""
-		Eliminate low frequencies for ECG data.
-		
-		Parameters
-		---------
-		data : ndarray
-			ECG voltage data to filter
-		cutoff : float, optional
-			Cuttoff frequency for filter, -3dB limit.  Defaults to 3Hz
-		N : int, optional
-			filter order, higher is sharper cutoff.  Defaults to 1
-		debug : bool, optional
-			Print output graphs for debugging.  Defaults to False
-		
-		Returns
-		------
-		data_filt : ndarray
-			High pass filtered data array
+		Step 1: Eliminate low frequencies for ECG data using a high-pass filter
 		"""
-		w_cut = cutoff/self.f_nyq #cutoff frequency as percentage of nyquist frequency
+		self.v_old = self.v #store previous step's voltage for reference
+			
+		w_cut = self.lcut/self.f_nyq #cutoff frequency as percentage of nyquist frequency
 		
-		b,a = signal.butter(N,w_cut,'highpass') #setup highpass filter
-		data_filt = signal.filtfilt(b,a,data) #filter data
+		b,a = signal.butter(self.lN,w_cut,'highpass') #setup highpass filter
+		self.v = signal.filtfilt(b,a,self.v_old) #filtered voltage data after Step 1
 		
 		if debug==True:
 			f,ax = pl.subplots(figsize=(9,5))
-			ax.plot(data,label='initial')
-			ax.plot(data_filt,label='filtered')
-			ax.set_xlabel('Sample No.')
+			ax.plot(self.t,self.v_old,label='initial')
+			ax.plot(self.t,self.v,label='Step 1')
+			ax.set_xlabel('Time [s]')
 			ax.set_ylabel('Voltage [mV]')
-		
-		return data_filt
 	
 	#Step 2 - Eliminate very high frequencies
-	def ElimVeryHighFreq(self,data,cutoff=20,N=1,detrend=True,debug=False):
+	def ElimVeryHighFreq(self,detrend=True,debug=False):
 		"""
-		Eliminate very high frequencies for ECG data.
+		Step 2: Eliminate very high frequencies for ECG data using a low-pass filter
+		Must be run after "ElimLowFreq" function is run
 		
 		Parameters
 		---------
-		data : ndarray
-			ECG voltage data after Step 1
-		cutoff : float, optional
-			Cutoff frequency for filter, -3dB limit.  Defaults to 20 Hz
-		N : int, optional
-			Filter order, higher is sharper cutoff.  Defaults to 1
 		detrend : bool, optional
 			Detrend data.  Defaults to True
-		debug : bool, optional
-			Print output graphs for debugging.   Defaults to False
-		
-		Returns
-		-------
-		data_filt : ndarray
-			Low-pass filtered data array
 		"""
-		w_cut = cutoff/self.f_nyq #cutoff frequency as percentage of nyquist frequency
+		self.v_old = self.v
+		w_cut = self.vhcut/self.f_nyq #cutoff frequency as percentage of nyquist frequency
 		
-		b,a = signal.butter(N,w_cut,'lowpass') #setup filter parameters
+		b,a = signal.butter(self.vhN,w_cut,'lowpass') #setup filter parameters
 		
 		#detrend - remove mean, linear associations
 		if detrend==True:
-			data_det = signal.detrend(data) #detrend data
-			data_filt = signal.filtfilt(b,a,data_det) #filter detrended data
+			data_det = signal.detrend(self.v_old) #detrend data
+			self.v = signal.filtfilt(b,a,data_det) #filter detrended data
 		else:
-			data_filt = signal.filtfilt(b,a,data) #filter input data
+			self.v = signal.filtfilt(b,a,self.v_old) #filter input data
 			
 		if debug==True:
 			f,ax = pl.subplots(figsize=(9,5))
-			ax.plot(data,label='initial')
-			ax.plot(data_filt,label='filtered')
-			ax.set_xlabel('Sample No.')
+			ax.plot(self.t,self.v_old,label='Step 1')
+			ax.plot(self.t,self.v,label='Step 2')
+			ax.set_xlabel('Time [s]')
 			ax.set_ylabel('Voltage [mV]')
-			
-		return data_filt
 	
 	#Step 3 - Eliminate Mains frequency (frequency of electrical signals - 60Hz for US)
-	def ElimMainsFreq(self,data,cutoff=60,Q=10,detrend=True,debug=False):
+	def ElimMainsFreq(self,detrend=True,debug=False):
 		"""
-		Eliminate Mains frequency caused by electronics.
+		Step 3: Eliminate Mains frequency caused by electronics.
 		60Hz in Americas.  50Hz in Europe.
+		Run after ElimVeryHighFreq
 		
 		Parameters
 		---------
-		data : float
-			ECG voltage data after Step 2
-		cutoff : float, optional
-			Cutoff frequency for notch filter.  Defaults to 60 Hz (US)
-		Q : int, optional
-			Filter order, higher is sharper cutoff.  Defaults to 10
 		detrend : bool, optional
 			Detrend data.  Defaults to True
-		debug : bool, optional
-			Print output graphs for debugging.  Defaults to False
-		
-		Returns
-		-------
-		data_filt : ndarray
-			Notch filtered data
 		"""
-		w0 = cutoff/self.f_nyq
-		b,a = signal.iirnotch(w0,Q)
+		self.v_old = self.v #store previous step data
+		
+		w0 = self.mcut/self.f_nyq
+		b,a = signal.iirnotch(w0,self.mQ)
 		
 		if detrend==True:
-			data_det = signal.detrend(data) #detrend data
-			data_filt = signal.filtfilt(b,a,data_det) #filter detrended data
+			data_det = signal.detrend(self.v_old) #detrend data
+			self.v = signal.filtfilt(b,a,data_det) #filter detrended data
 		else:
-			data_filt = signal.filtfilt(b,a,data) #detrend input data
+			self.v = signal.filtfilt(b,a,self.v_old) #detrend input data
 		
 		if debug==True:
 			f,ax = pl.subplots(figsize=(9,5))
-			ax.plot(data,label='initial')
-			ax.plot(data_filt,label='filtered')
-			ax.set_xlabel('Sample No.')
+			ax.plot(self.t,self.v_old,label='Step 2')
+			ax.plot(self.t,self.v,label='Step 3')
+			ax.set_xlabel('Time [s]')
 			ax.set_ylabel('Voltage [mV]')
-			
-		return data_filt
 	
-	#Step 3.5 - Lead Inversion Check
-	def CheckLeadInversion(self,data,debug=False):
+	#Step 4 - Lead Inversion Check
+	def CheckLeadInversion(self,debug=False):
 		"""
-		Check for lead inversion by examining percentage of local extrema that are negative.
-		R-peaks (maximum local extrema) should be positive.
-		
-		Parameters
-		---------
-		data : ndarray
-			ECG volage data.  Usually after step 3, but can be after import
-		debug : bool, optional
-			Print peak values for debugging.  Defaults to False
-		
-		Returns
-		-------
-		data_check : ndarray
-			Correct orientation float of voltage data for ECG signal
-		lead_inv : bool
-			Boolean if leads were inverted.  False if not inverted, True if inverted
+		Step 4: Check for lead inversion by examining percentage of local 
+		extrema that are negative. R-peaks (maximum local extrema) should be positive.
+		Run after ElimMainsFreq
 		"""
 		
-		d2 = data**2 #square data for all positive and prominent peaks
+		d2 = self.v**2 #square data for all positive and prominent peaks
 		d2_max = max(d2) #maximum of squared data
 		d2_max_pks = np.zeros_like(d2) #allocate array for peaks
 		
@@ -184,193 +215,127 @@ class ECGAnalysis(object):
 		d2_max_pks[inds] = d2[inds] #squared values greater than 20% max, 0s elsewhere
 		d2_pks = signal.argrelmax(d2_max_pks)[0] #locations of maximum peaks
 		
-		d_pks = data[d2_pks] #data values at local extrema (found from squard values)
+		d_pks = self.v[d2_pks] #data values at local extrema (found from squard values)
 		
 		#percentage of peaks with values that are negative
 		p_neg_pks = len(np.where(d_pks<0)[0])/len(d_pks) 
 		
 		if debug==True:
-			x = np.array([i for i in range(len(data))])
+			x = np.array([i for i in range(len(self.v))])
 			f,ax = pl.subplots(figsize=(9,5))
-			ax.plot(x,data)
-			ax.plot(x[d2_pks],data[d2_pks],'+')
+			ax.plot(x,self.v)
+			ax.plot(x[d2_pks],self.v[d2_pks],'+')
 			ax.set_xlabel('Sample No.')
 			ax.set_ylabel('Voltage [mV]')
 		
 		if p_neg_pks>=0.5:
-			return -data, True
+			self.v *= -1
+			self.lead_inv = True
 		elif p_neg_pks<0.5:
-			return data, False
+			self.lead_inv = False
 	
-	#Step 4 - Eliminate sub-cardiac frequencies
-	def ElimSubCardiacFreq(self,data,cutoff=0.5,N=4,debug=False):
+	#Step 5 - Eliminate sub-cardiac frequencies
+	def ElimSubCardiacFreq(self,debug=False):
 		"""
-		Eliminate sub-cardiac frequencies (30 BPM - 0.5Hz)
-		
-		Parameters
-		---------
-		data : ndarray
-			ECG voltage data, correctly oriented and passed through stages 1-3 of filtering
-		cutoff : float, optional
-			Cutoff frequency for high-pass filter.  Defaults to 0.5 Hz (30 BPM)
-		N : int, optional
-			Filter order.  Defaults to 4
-		debug : bool
-			Graph input and output data.  Defaults to False
-		
-		Returns
-		-------
-		data_filt : ndarray
-			High-pass filtered data
+		Step 5: Eliminate sub-cardiac frequencies (30 BPM - 0.5Hz)
 		"""
-		w_cut = cutoff/self.f_nyq #define cutoff frequency as % of nyq. freq.
-		b,a = signal.butter(N,w_cut,'highpass') #setup high pass filter
+		self.v_old = self.v #store previous step data 
 		
-		data_filt = signal.filtfilt(b,a,data) #backwards-forwards filter
+		w_cut = self.sccut/self.f_nyq #define cutoff frequency as % of nyq. freq.
+		b,a = signal.butter(self.scN,w_cut,'highpass') #setup high pass filter
+		
+		self.v = signal.filtfilt(b,a,self.v_old) #backwards-forwards filter
 		
 		if debug==True:
 			f,ax = pl.subplots(figsize=(9,5))
-			ax.plot(data,label='initial')
-			ax.plot(data_filt,label='filtered')
+			ax.plot(self.t,self.v_old,label='Step 4')
+			ax.plot(self.t,self.v,label='Step 5')
 			ax.legend()
-			ax.set_xlabel('Sample No.')
+			ax.set_xlabel('Time [s]')
 			ax.set_ylabel('Voltage [mV]')
 		
-		return data_filt
+		self.v_old = None #remove from memory
 	
-	def DerivativeFilter(self,data,time,plot=False):
+	def DerivativeFilter(self,plot=False):
 		"""
-		Calculated derivative of data.
+		Calculated derivative of filtered data, as well as squaring data before next step
 		
-		Parameters
-		---------
-		data : ndarray
-			ECG voltage data after steps 1-4 filtering and lead inversion check
-		time : ndarray
-			ECG sample timings
-		plot : bool
-			Plot resulting data.  Defaults to False
-		
-		Returns
-		-------
-		data_der : ndarray
-			Derivative of input data
-		time_der : ndarray
-			Associated timings.  Some cut by derivative operation
+		Class Results
+		-------------
+		v_der : ndarray
+			Derivative of filtered voltage signal data
+		t_der : ndarray
+			Timestamps for derivative voltage data
 		"""
-		dt = time[1]-time[0] #timestep
-		data_der = (-data[:-4]-2*data[1:-3]+2*data[3:-1]+data[4:])/(8*dt) #derivative
+		self.dt = self.t[1]-self.t[0] #timestep
+		self.v_der = (-self.v[:-4]-2*self.v[1:-3]+2*self.v[3:-1]+self.v[4:])/(8*self.dt)
+		self.t_der = self.t[2:-2] #timsteps are cut short by 2 on either end
+		
+		self.v_sq = self.v_der**2
 		
 		if plot==True:
-			f,ax = pl.subplots(figsize=(9,5))
-			ax.plot(time[2:-2],data_der,label='Derivative')
-			ax.legend()
-		
-		return data_der, time[2:-2] #timings are shortened at start and end by 2 samples
+			f,ax = pl.subplots(2,figsize=(9,5),sharex=True)
+			ax[0].plot(self.t_der,self.v_der,label='Derivative')
+			ax[1].plot(self.t_der,self.v_sq,label='Squared')
+			ax[0].legend()
+			ax[1].legend()
+			f.tight_layout()
+			f.subplots_adjust(hspace=0)
 	
-	def _SquaredFilter(self,data):
+	def IntegratedAverageFilter(self,plot=False):
 		"""
-		Square values of data.
+		Average by integration of squared data.
 		
-		Parameters
-		---------
-		data : ndarray
-			ECG voltage data after derivative filter applied
-		
-		Returns
-		------
-		data_sq : ndarray
-			Square filter data
+		Class Returns
+		-------------
+		v_int : ndarray
+			Average by integration resulting signal
+		t_int : ndarray
+			Timestamps for resulting average signal
 		"""
-		return data**2
-	
-	def IntegratedAverageFilter(self,data,time,width=150,plot=False):
-		"""
-		Average by integration of data.
-		
-		Parameters
-		---------
-		data : ndarray
-			ECG voltage data after squaring
-		time : ndarray
-			Timings for samples associated with ECG data in seconds
-		width : int, optional
-			Time width (ms) of integration window.  Defaults to 150ms (0.15s)
-		plot : bool
-			Plot output data. Defaults to False
-			
-		Returns
-		-------
-		data_int : ndarray
-			Average by integration data
-		time_int : ndarray
-			Associated timings, cut by proper amount for integration-average filter
-		"""
-		dt = time[1]-time[0] #timestep
-		
 		#number of samples to use for integration average window
 		#window width in seconds/timestep
-		N = int((width/1000)/dt)
+		N = int((self.iaw/1000)/self.dt)
 		
-		data_int = (1/N)*np.array([sum(data[i-N:i+1]) for i in range(N,len(data))])
+		self.v_int = (1/N)*np.array([sum(self.v_sq[i-N:i+1]) for i in range(N,len(self.v_sq))])
+		self.t_int = self.t_der[N:]
 		
 		if plot==True:
 			pl.figure(figsize=(9,5))
-			pl.plot(time[N:],data_int,label='Integrated')
+			pl.plot(self.t_der[N:],self.v_int,label='Integrated')
 			pl.legend()
 			pl.xlabel('Time [s]')
 		
-		return data_int, time[N:] #timings shortened only in the beginning
-		
-	def FindPeaksLearning(self,v_f,t_f,v_int,v_der,width=150,t_learn=8,delay=175,debug=False):
+	def FindPeaksLearning(self,debug=False):
 		"""
 		Learning function for R-peak detection.
 		
-		Parameters
-		---------
-		v_f : ndarray
-			FilteredECG voltage signal (ie after Sub-cardiac freq elimination)
-		t_f : ndarray
-			Timings associated with bandpassed ECG signal
-		v_int : ndarray
-			Average by integration voltage signal.
-		v_der : ndarray
-			Derivative voltage signal
-		width : float, optional
-			Integration window width in milliseconds.  Defaults to 150ms
-		t_learn : float, optional
-			Amount of time (seconds) for learning algorithm to work on.  Defaults to 8s
-		t_delay : float, optional
-			Amount of time (ms) to wait before declaring peak if 1/2 amplitude not found.  
-			Defaults to 175ms
-		
-		Returns
+		Class Returns
 		-------
 		rr8 : float
 			Initial average R-R peak times
 		tsn_i : TSN
 			Integrated data thresholds and signal and noise moving averages
-		tsn_f : 
+		tsn_f : TSN
 			Filtered data thresholds and signal and noise moving averages
 		"""
-		dt = t_f[1]-t_f[0]
-		n_dly = int(delay/1000*self.fs) #number of samples corresponding to delay
+		n_dly = int(self.delay/1000*self.fs) #number of samples corresponding to delay
 		#number of samples in 25,125,225ms
 		n_25,n_125,n_225 = int(0.025*self.fs),int(0.125*self.fs),int(0.225*self.fs)
-		n_lrn = int(t_learn*self.fs) #number of samples in t_learn seconds
+		n_lrn = int(self.tlearn*self.fs) #number of samples in t_learn seconds
 		
 		#append 0s to front of integrated signal
-		v_int = np.append([0]*(len(v_f)-len(v_int)-2),v_int)
+		self.v_int = np.append([0]*(len(self.v)-len(self.v_int)-2),self.v_int)
 		#number of 0s needs to be changed if different derivative scheme
-		v_der = np.append([0,0],v_der)
+		self.v_der = np.append([0,0],self.v_der)
 		
-		v_f = v_f[:n_lrn] #want only beginning t_learn seconds
-		v_int = v_int[:n_lrn]
-		v_der = v_der[:n_lrn]
-		t_f = t_f[:n_lrn]
+		v_f = self.v[:n_lrn] #want only beginning t_learn seconds
+		v_int = self.v_int[:n_lrn]
+		v_der = self.v_der[:n_lrn]
+		t_f = self.t[:n_lrn]
 		
 		#peaks in region with width equal to integration width
-		ii_pks = signal.argrelmax(v_int,order=int(0.5*width/1000/dt))[0] 
+		ii_pks = signal.argrelmax(v_int,order=int(0.5*self.iaw/1000/self.dt))[0] 
 		
 		#remove any peaks that are less than 0.1% of mean of the peaks
 		ii_pks = ii_pks[np.where(v_int[ii_pks]>0.001*np.mean(v_int[ii_pks]))[0]]
@@ -434,41 +399,47 @@ class ECGAnalysis(object):
 		
 		#Create R-R average arrays
 		if len(r_t)<=8:
-			rr8 = np.ones(8)*r_t[1]-r_t[0]
-			rr8[-len(r_t)+1:] = np.array(r_t[1:])-np.array(r_t[:-1])
+			self.rr8 = np.ones(8)*r_t[1]-r_t[0]
+			self.rr8[-len(r_t)+1:] = np.array(r_t[1:])-np.array(r_t[:-1])
 		elif len(r_t)>8:
-			rr8 = np.array(r_t[len(r_t)-8:])-np.array(r_t[len(r_t)-9:-1])
+			self.rr8 = np.array(r_t[len(r_t)-8:])-np.array(r_t[len(r_t)-9:-1])
 		
-		tsn_i = TSN() #tsn for integrated data
-		tsn_f = TSN() #tsn for filtered data
+		self.tsn_i = TSN() #tsn for integrated data
+		self.tsn_f = TSN() #tsn for filtered data
 		
 		#initialize signal peak for integrated data
-		tsn_i.spk = 0.125*vi_pks[np.where(v_f[band_pk]==r_v[0])[0][0]]
+		self.tsn_i.spk = 0.125*vi_pks[np.where(v_f[band_pk]==r_v[0])[0][0]]
 		#initialize noise peak for integrated data
-		tsn_i.npk = 0.125*vi_pks[np.where(v_f[band_pk]==t_v[0])[0][0]]
-		tsn_f.spk = 0.125*r_v[0] #initialize signal peak for filtered data
-		tsn_f.npk = 0.125*t_v[0] #initialize noise peak for filtered data
+		self.tsn_i.npk = 0.125*vi_pks[np.where(v_f[band_pk]==t_v[0])[0][0]]
+		self.tsn_f.spk = 0.125*r_v[0] #initialize signal peak for filtered data
+		self.tsn_f.npk = 0.125*t_v[0] #initialize noise peak for filtered data
+		
 		for i in range(1,len(r_v)):
-			tsn_i.spk = 0.125*vi_pks[np.where(v_f[band_pk]==r_v[i])[0][0]] + 0.875*tsn_i.spk
-			tsn_i.npk = 0.125*vi_pks[np.where(v_f[band_pk]==t_v[0])[0][0]] + 0.875*tsn_i.npk
-			tsn_f.spk = 0.125*r_v[i] + 0.875*tsn_f.spk
-			tsn_f.npk = 0.125*t_v[i] + 0.875*tsn_f.npk
-			tsn_i.t = tsn_i.npk + 0.25*(tsn_i.spk-tsn_i.npk) #threshold for integrated data
-			tsn_f.t = tsn_f.npk + 0.25*(tsn_f.spk-tsn_f.npk) #threshold for filtered data
+			self.tsn_i.spk = 0.125*vi_pks[np.where(v_f[band_pk]==r_v[i])[0][0]]\
+					 + 0.875*self.tsn_i.spk
+					 
+			self.tsn_i.npk = 0.125*vi_pks[np.where(v_f[band_pk]==t_v[0])[0][0]]\
+					 + 0.875*self.tsn_i.npk
+					 
+			self.tsn_f.spk = 0.125*r_v[i] + 0.875*self.tsn_f.spk
+			self.tsn_f.npk = 0.125*t_v[i] + 0.875*self.tsn_f.npk
+			
+			#threshold for integrated data
+			self.tsn_i.t = self.tsn_i.npk + 0.25*(self.tsn_i.spk-self.tsn_i.npk)
+			#threshold for filtered data 
+			self.tsn_f.t = self.tsn_f.npk + 0.25*(self.tsn_f.spk-self.tsn_f.npk) 
 			
 		if debug==True:
 			f,ax = pl.subplots(2,figsize=(9,5),sharex=True)
-			ax[0].plot(t_f,v_int)
+			ax[0].plot(self.t,self.v_int)
 			ax[0].plot(ti_pks,vi_pks,'o')
-			ax[0].plot(t_f[pki_h],v_int[pki_h],'o')
-			ax[0].axhline(tsn_i.t,linestyle='--',color='k')
-			ax[1].plot(t_f,v_f)
+			ax[0].plot(self.t[pki_h],self.v_int[pki_h],'o')
+			ax[0].axhline(self.tsn_i.t,linestyle='--',color='k')
+			ax[1].plot(self.t,self.v)
 			ax[1].plot(r_t,r_v,'ro')
 			ax[1].plot(t_t,t_v,'go')
-			ax[1].axhline(tsn_f.t,linestyle='--',color='k')
+			ax[1].axhline(self.tsn_f.t,linestyle='--',color='k')
 			pl.tight_layout()
-			
-		return rr8, tsn_i, tsn_f
 	
 	@staticmethod
 	def _UpdateAvgRR(rr_int,rr8,rr8_lim):
@@ -537,61 +508,35 @@ class ECGAnalysis(object):
 		
 		return tsn_i,tsn_f
 	
-	def FindRPeaks(self,v_f,t_f,v_i,v_d,rr8,tsn_i,tsn_f,width=150,delay=175,debug=False):
+	def FindRPeaks(self,debug=False):
 		"""
 		Algorithm implementation to find R-peaks in ECG of Hamilton and Tompkins, 1986.  
 		"Quantitative Investigation of QRS Detection Rules Using the 
 		MIT/BIH Arrhythmia Database"
 		
-		Parameters
-		----------
-		v_f : ndarray
-			Filtered ECG data
-		t_f : ndarray
-			Timings associated with filtered ecg data
-		v_i : ndarray
-			Integrated average data
-		v_d : ndarray
-			Derivative signal data
-		rr8 : list of floats
-			List/array of R-R timings from the FindPeaksLearning function output
-		tsn_i : TSN
-			Threshold, signal, noise peak values for integrated data from 
-			FindPeaksLearning output
-		tsn_f : TSN
-			Threshold, signal, noise peak values for filtered data from 
-			FindPeaksLearning output
-		width : float, optional
-			TIme (ms) of integration window for integration step.  Defaults to 150ms
-		delay : float, optional
-			Time (ms) to wait before declaring peak if descending 
-			half max peak value not found.  Defaults to 175ms
-		
-		Returns
+		Class Returns
 		-------
 		r_pks : ndarray
-			N-by-2 array of [r-peak voltage,r-peak timestamp]
+			N-by-2 array of [r-peak timestamp,r-peak voltage]
 		q_trs : ndarray
-			N-by-2 array of [q-trough voltage, q-trough timestamp]
+			N-by-2 array of [q-trough timestamp, q-trough voltage]
 		"""
 		
-		v_d = np.append(v_d,[0,0])
-		v_d = np.append([0,0],v_d)
-		v_i = np.append(v_i,[0]*2) #append 2 zeros for derivative change
+		self.v_der = np.append(self.v_der,[0,0])
+		self.v_der = np.append([0,0],self.v_der)
+		self.v_int = np.append(self.v_int,[0]*2) #append 2 zeros for derivative change
 		#append zeros to front for integration and d/dx change
-		v_i = np.append([0]*int(len(v_f)-len(v_i)),v_i)
-		
-		dt = t_f[1]-t_f[0] #time difference between samples
+		self.v_int = np.append([0]*int(len(self.v)-len(self.v_int)),self.v_int)
 		
 		#number of samples in 25,125,225ms
 		n25,n125,n225 = int(0.025*self.fs),int(0.125*self.fs),int(0.225*self.fs)  
-		nw = int(width/1000*self.fs) #number of samples in width ms
-		nd = int(delay/1000*self.fs) #number of samples in delay ms
+		nw = int(self.iaw/1000*self.fs) #number of samples in integration window width
+		nd = int(self.delay/1000*self.fs) #number of samples in delay ms
 		
 		rr8_lim = np.zeros(8) #initialize limited R-R array
 		
 		#peak indices in region with width equal to integration window width
-		vi_pts = signal.argrelmax(v_i,order=int(0.5*width/1000/dt))[0]
+		vi_pts = signal.argrelmax(self.v_int,order=int(0.5*self.iaw/1000/self.dt))[0]
 		#descending half peak value initilization.  Stores indices 
 		vi_hpt = np.zeros_like(vi_pts)
 		#maximum values and indices for each peak in filtered data
@@ -600,22 +545,25 @@ class ECGAnalysis(object):
 		#maximum slopes and indices for each peak.  
 		#Initialized as +1 due to comparison with previous slope later
 		m_pos = np.zeros((len(vi_pts)+1,2))
-		r_pks = np.zeros((1,2)) #initialize vector for R peak values and timestamps
+		self.r_pks = np.zeros((1,2)) #initialize vector for R peak values and timestamps
 		
 		for i in range(len(vi_pts)):
 			#finding maximum slope in the +- width surrounding each peak
-			if vi_pts[i]-nw > 0 and vi_pts[i]+nw<len(v_i): #if +- window is fully in data range
-				m_pos[i+1] = [max(v_d[vi_pts[i]-nw:vi_pts[i]+nw])+int(vi_pts[i]-nw),\
-								 np.argmax(v_d[vi_pts[i]-nw:vi_pts[i]+nw])+int(vi_pts[i]-nw)]
+			#if +- window is fully in data range
+			if vi_pts[i]-nw > 0 and vi_pts[i]+nw<len(self.v_int): 
+				m_pos[i+1] = [max(self.v_der[vi_pts[i]-nw:vi_pts[i]+nw])+int(vi_pts[i]-nw),\
+								 np.argmax(self.v_der[vi_pts[i]-nw:vi_pts[i]+nw])+int(vi_pts[i]-nw)]
 			elif vi_pts[i]-nw < 0: #if the window goes before data range
-				m_pos[i+1] = [max(v_d[0:vi_pts[i]+nw]),np.argmax(v_d[0:vi_pts[i]+nw])]
-			elif vi_pts[i]+nw > len(v_i): #if the window goes outside end of data range
-				m_pos[i+1] = [max(v_d[vi_pts[i]-nw:]),np.argmax(v_d[vi_pts[i]-nw:])]
+				m_pos[i+1] = [max(self.v_der[0:vi_pts[i]+nw]),\
+									 np.argmax(self.v_der[0:vi_pts[i]+nw])]
+			elif vi_pts[i]+nw > len(self.v_int): #if the window goes outside end of data range
+				m_pos[i+1] = [max(self.v_der[vi_pts[i]-nw:]),\
+									 np.argmax(self.v_der[vi_pts[i]-nw:])]
 			
 			#finding descending half peak value
 			try:
-				vi_hpt[i] = np.where(v_i[vi_pts[i]:int(m_pos[i+1,1])+nd] \
-											 <0.5*v_i[vi_pts[i]])[0][0] + vi_pts[i]
+				vi_hpt[i] = np.where(self.v_int[vi_pts[i]:int(m_pos[i+1,1])+nd] \
+											 <0.5*self.v_int[vi_pts[i]])[0][0] + vi_pts[i]
 				longwave=False #not a long QRS wave complex
 			except:
 				vi_hpt[i] = vi_pts[i] + nd
@@ -623,38 +571,40 @@ class ECGAnalysis(object):
 			
 			#find maximum values in filtered data preceeding descending half peak values
 			if longwave==False: #if not a long wave search preceeding 225 to 125ms
-				vf_pks[i] = [max(v_f[vi_hpt[i]-n225:vi_hpt[i]-n125]),\
-								  np.argmax(v_f[vi_hpt[i]-n225:vi_hpt[i]-n125])+vi_hpt[i]-n225]
+				vf_pks[i] = [max(self.v[vi_hpt[i]-n225:vi_hpt[i]-n125]),\
+								  np.argmax(self.v[vi_hpt[i]-n225:vi_hpt[i]-n125])+vi_hpt[i]-n225]
 			elif longwave==True: #if long wave, search preceeding 250 to 150 ms
-				vf_pks[i] = [max(v_f[vi_hpt[i]-n225-n25:vi_hpt[i]-n125-n25]),\
-					  np.argmax(v_f[vi_hpt[i]-n225-n25:vi_hpt[i]-n125-n25])+vi_hpt[i]-n225-n25]
+				vf_pks[i] = [max(self.v[vi_hpt[i]-n225-n25:vi_hpt[i]-n125-n25]),\
+					  np.argmax(self.v[vi_hpt[i]-n225-n25:vi_hpt[i]-n125-n25])+vi_hpt[i]-n225-n25]
 				
 			#Determine type of peak (R,T, etc)
 			#if the peaks are above the thresholds and time between is greater than 0.36s		
-			if v_i[vi_pts[i]] > tsn_i.t and vf_pks[i,0] > tsn_f.t and \
-										(t_f[int(vf_pks[i,1])]-r_pks[-1,1])>=0.36:
-				r_pks = np.append(r_pks,[[vf_pks[i,0],t_f[int(vf_pks[i,1])]]],axis=0)
+			if self.v_int[vi_pts[i]] > self.tsn_i.t and vf_pks[i,0] > self.tsn_f.t and \
+										(self.t[int(vf_pks[i,1])]-self.r_pks[-1,0])>=0.36:
+				self.r_pks = np.append(self.r_pks,[[self.t[int(vf_pks[i,1])],vf_pks[i,0]]]\
+											  ,axis=0)
 				j = i+1 #assign key value.  Index of the last detected r_peak
-				tsn_i,tsn_f = self._UpdateThresholds(v_i[vi_pts[i]],r_pks[-1,0],\
-																 tsn_i,tsn_f,signal=True)
+				self.tsn_i,self.tsn_f = self._UpdateThresholds(self.v_int[vi_pts[i]],\
+												   self.r_pks[-1,1],self.tsn_i,self.tsn_f,signal=True)
 			
 			#peaks above thresholds, time between is greater than 0.2s but less than 0.36s
-			elif v_i[vi_pts[i]] > tsn_i.t and vf_pks[i,0] > tsn_f.t and \
-										(t_f[vf_pks[i,1]]-r_pks[-1,1])>0.2:
+			elif self.v_int[vi_pts[i]] > self.tsn_i.t and vf_pks[i,0] > self.tsn_f.t and \
+										(self.t[vf_pks[i,1]]-self.r_pks[-1,0])>0.2:
 				#if the maximum associated slope is greater than half the previous 
 				#detected R wave
 				if m_pos[i+1,0] > 0.5*m_pos[j,0]: #it is a R peak
-					r_pks = np.append(r_pks,[vf_pks[i,0],t_f[v_f[i,1]]],axis=0)
+					self.r_pks = np.append(self.r_pks,[self.t[int(vf_pks[i,1])],vf_pks[i,0]]\
+											   ,axis=0)
 					j = i+1
-					tsn_i,tsn_f = self._UpdateThresholds(v_i[vi_pts[i]],r_pks[-1,0],\
-																	  tsn_i,tsn_f,signal=True)
+					self.tsn_i,self.tsn_f = self._UpdateThresholds(self.v_int[vi_pts[i]],\
+													self.r_pks[-1,0],self.tsn_i,self.tsn_f,signal=True)
 				else: #it is a peak
-					tsn_i,tsn_f = self._UpdateThresholds(v_i[vi_pts[i]],v_f[vi_pts[i]],\
-																	  tsn_i,tsn_f,signal=False)
+					self.tsn_i,self.tsn_f = self._UpdateThresholds(self.v_int[vi_pts[i]],\
+													self.v[vi_pts[i]],self.tsn_i,self.tsn_f,signal=False)
 			
 			else: #if not above the thresholds it is a noise peak
-				tsn_i,tsn_f = self._UpdateThresholds(v_i[vi_pts[i]],v_f[vi_pts[i]],\
-																 tsn_i,tsn_f,signal=False)
+				self.tsn_i,self.tsn_f = self._UpdateThresholds(self.v_int[vi_pts[i]],\
+												   self.v[vi_pts[i]],self.tsn_i,self.tsn_f,signal=False)
 
 			##########################################################################
 			#     Missing check for missing r-peaks by looking at peaks between      #
@@ -662,39 +612,38 @@ class ECGAnalysis(object):
 			#     166% of the limited average: avg(rr8_lim)  	                       #
 			##########################################################################
 			
-			if len(r_pks)>2: #if there have been 2 R-peaks detected
-				rr8,rr8_lim = self._UpdateAvgRR(r_pks[-1,1]-r_pks[-2,1],rr8,rr8_lim)
+			if len(self.r_pks[:,0])>2: #if there have been 2 R-peaks detected
+				self.rr8,rr8_lim = self._UpdateAvgRR(self.r_pks[-1,0]-self.r_pks[-2,0],\
+										 self.rr8,rr8_lim)
 			
-		r_pks = r_pks[1:,:] #trim off first initialized entry
-		q_trs = np.zeros_like(r_pks) #initialize Q-troughs array
-		for i in range(len(r_pks[:,0])):
-			i_rpk = np.where(t_f==r_pks[i,1])[0][0] #index of R-peak
+		self.r_pks = self.r_pks[1:,:] #trim off first initialized entry
+		self.q_trs = np.zeros_like(self.r_pks) #initialize Q-troughs array
+		for i in range(len(self.r_pks[:,0])):
+			i_rpk = np.where(self.t==self.r_pks[i,0])[0][0] #index of R-peak
 			#look in preceeding 0.1s of R-peak for the minimum
-			q_trs[i] = [min(v_f[i_rpk-int(0.1*self.fs):i_rpk]),\
-						 t_f[np.argmin(v_f[i_rpk-int(0.1*self.fs):i_rpk])+i_rpk-int(0.1*self.fs)]]
+			self.q_trs[i] = [self.t[np.argmin(self.v[i_rpk-int(0.1*self.fs):i_rpk])\
+							  +i_rpk-int(0.1*self.fs)],min(self.v[i_rpk-int(0.1*self.fs):i_rpk])]
 		
 		if debug==True:
 			f,ax = pl.subplots(2,figsize=(9,5),sharex=True)
-			ax[0].plot(t_f,v_f,label='filtered')
-			ax[0].plot(r_pks[:,1],r_pks[:,0],'r+')
-			ax[0].plot(q_trs[:,1],q_trs[:,0],'k+')
+			ax[0].plot(self.t,self.v,label='filtered')
+			ax[0].plot(self.r_pks[:,0],self.r_pks[:,1],'r+')
+			ax[0].plot(self.q_trs[:,0],self.q_trs[:,1],'k+')
 			ax[0].legend(loc='best')
 			
-			ax[1].plot(t_f,v_i,label='integrated')
+			ax[1].plot(self.t,self.v_int,label='integrated')
 			try:
-				ax[1].plot(t_f[vi_hpt],v_i[vi_hpt],'ko')
+				ax[1].plot(self.t[vi_hpt],self.v_int[vi_hpt],'ko')
 			except:
-				ax[1].plot(t_f[vi_hpt[:-1]],v_i[vi_hpt[:-1]],'ko')
-			ax[1].plot(t_f[vi_pts],v_i[vi_pts],'ro')
+				ax[1].plot(self.t[vi_hpt[:-1]],self.v_int[vi_hpt[:-1]],'ko')
+			ax[1].plot(self.t[vi_pts],self.v_int[vi_pts],'ro')
 			ax[1].legend(loc='best')
 			ax[1].set_xlabel('Time [s]')
 			
 			f.tight_layout()
 			f.subplots_adjust(hspace=0)
-		
-		return r_pks,q_trs
 	
-	def RespRateExtraction(self,r_pks,q_trs):
+	def RespRateExtraction(self):
 		"""
 		Compute parameters for respiratory rate estimation.
 		
@@ -705,58 +654,64 @@ class ECGAnalysis(object):
 		q_trs : ndarray
 			N-by-2 array of [Q-trough voltage, Q-trough timestamp]
 		
-		Returns
+		Class Returns
 		-------
 		bw : ndarray
-			Array of N voltages.  Mean of associated troughs and peaks
+			N by 2 array of timestamps and voltages.  Mean of associated troughs and peaks
 		am : ndarray
-			Array of N voltages.  Difference between associated troughs and peaks
+			N by 2 array timestamps and voltages.  
+			Difference between associated troughs and peaks
 		fm : ndarray
-			Array of N-1 voltages.  Difference in time between consecutive R-peaks
-		t_fm : ndarray
-			Array of N-1 times associated with 'fm' values
+			N-1 by 2 array of timestamps and voltages.  
+			Difference in time between consecutive R-peaks
 		"""
-		bw = np.mean([r_pks[:,0],q_trs[:,0]],axis=0) #X_b1 from Charlton paper
-		am = r_pks[:,0]-q_trs[:,0] #X_b2
-		fm = r_pks[1:,1]-r_pks[:-1,1] #X_b3
-		t_fm = (r_pks[1:,1]+r_pks[:-1,1])/2
+		self.bw = np.copy(self.r_pks)
+		#X_b1 from Charlton paper
+		self.bw[:,1] = np.mean([self.r_pks[:,1],self.q_trs[:,1]],axis=0) 
 		
-		return bw, am, fm, t_fm
+		self.am = np.copy(self.r_pks)
+		self.am[:,1] = self.r_pks[:,1]-self.q_trs[:,1] #X_b2
+		
+		self.fm = np.zeros((len(self.r_pks[:,0])-1,2))
+		self.fm[:,1] = self.r_pks[1:,0]-self.r_pks[:-1,0] #X_b3
+		self.fm[:,0] = (self.r_pks[1:,0]+self.r_pks[:-1,0])/2
 	
-	def FMSplineInterpolate(self,fm,t_fm,debug=False):
+	@staticmethod
+	def SplineInterpolate(data,debug=False):
 		"""
-		Spline Interpolation of frequency modulated data
+		Spline Interpolation of data
 		
 		Parameters
 		---------
-		fm : ndarray
-			Array of N-1 voltages.  Difference in time between consecutive R-peaks
-		t_fm : ndarray
-			Array of N-1 times associated with 'fm' values
+		data : ndarray
+			N-1 by 2 array of timestamps and data
 		
 		Returns
 		-------
-		xs : ndarray
-			Array of x-values for computed spline
-		ys : ndarray
-			Array of y-values for computed spline
+		spl : ndarray
+			N by 2 array of x and y values of spline
 		"""
-		cs = interpolate.CubicSpline(t_fm,fm) #setup spline function
-		xs = np.arange(t_fm[0],t_fm[-1],0.2) #setup x values.  0.2s intervals
+		cs = interpolate.CubicSpline(data[:,0],data[:,1]) #setup spline function
+		xs = np.arange(data[0,0],data[-1,0],0.2) #setup x values.  0.2s intervals
 		
 		#if x-values don't include end time, add it to the array
-		if xs[-1] != t_fm[-1]:
-			xs = np.append(xs,t_fm[-1])
+		if xs[-1] != data[-1,0]:
+			xs = np.append(xs,data[-1,0])
+			
+		spl = np.zeros((len(xs),2))
+		spl[:,1] = cs(xs)
+		spl[:,0] = xs
 			
 		if debug==True:
 			pl.figure()
-			pl.plot(t_fm,fm,'o',label='fm values')
+			pl.plot(data[:,0],data[:,1],'o',label='fm values')
 			pl.plot(xs,cs(xs),label='spline')
 			pl.legend()
 		
-		return xs, cs(xs) #xy, ys
+		return spl
 	
-	def CountOriginal(self,data,t,debug=False):
+	@staticmethod
+	def CountOriginal(data,debug=False):
 		"""
 		Implementation of Original Count Method from 
 		Axel Schafer, Karl Kratky.  "Estimation of Breathing Rate from Respiratory
@@ -766,24 +721,22 @@ class ECGAnalysis(object):
 		Parameters
 		----------
 		data : ndarray
-			Array of data of interest.  Originally used for R-R interval timings.
-		t : ndarray
-			Timings for data of interest
+			N by 2 array of timestamps and data
 			
 		Returns
 		------
 		rr : ndarray
-			N-by-2 array of respiration frequencies (Beats per sec) and timings
+			N by 2 array of respiration timings and frequencies (beats per second)
 		"""
 		#step 1 - bandpass filter with pass region between 0.1-0.5Hz
-		fs = 1/(t[1]-t[0]) #spline data frequency
+		fs = 1/(data[1,0]-data[0,0]) #spline data frequency
 		wl = 0.1/(0.5*fs) #low cutoff frequency as % of nyquist frequency
 		wh = 0.5/(0.5*fs) #high cutoff freq as % of nyquist freq
 		
 		b,a = signal.butter(5,[wl,wh],'bandpass') #filtfilt, -> order is 2x given
 		
-		data -= np.mean(data) #remove mean from data
-		df = signal.filtfilt(b,a,data) #apply filter to input data
+		data[:,1] -= np.mean(data[:,1]) #remove mean from data
+		df = signal.filtfilt(b,a,data[:,1]) #apply filter to input data
 		
 		#step 2 - find local minima and maxima of filtered data
 		# get 3rd quartile, threshold is Q3*0.2
@@ -807,19 +760,20 @@ class ECGAnalysis(object):
 			if etp[i]==True and etp[i+2]==True and etp[i+1]==False:
 				if df[ext[i]]>thr and df[ext[i+2]]>thr and df[ext[i+1]]<0:
 					brth_cyc.append([ext[i],ext[i+2]])
-					rr = np.append(rr,[[1/(t[ext[i+2]]-t[ext[i]]),t[ext[i+1]]]],axis=0)
+					rr = np.append(rr,[[data[ext[i+1],0],1/(data[ext[i+2],0]\
+						 -data[ext[i],0])]],axis=0)
 		rr = rr[1:,:]			
 		
 		if debug==True:
 			f,ax = pl.subplots(2,figsize=(9,5),sharex=True)
-			ax[0].plot(t,data,'k--',alpha=0.5,label='initial')
-			ax[0].plot(t,df,'b',label='filtered')
-			ax[0].plot(t[minpt],df[minpt],'*')
-			ax[0].plot(t[maxpt],df[maxpt],'o')
+			ax[0].plot(data[:,0],data[:,1],'k--',alpha=0.5,label='initial')
+			ax[0].plot(data[:,0],df,'b',label='filtered')
+			ax[0].plot(data[minpt,0],df[minpt],'*')
+			ax[0].plot(data[maxpt,0],df[maxpt],'o')
 			ax[0].axhline(thr)
 			for st,sp in brth_cyc:
-				ax[0].plot(t[st:sp],df[st:sp],'r',linewidth=2,alpha=0.5)
-			ax[1].plot(rr[:,1],rr[:,0]*60,'+')
+				ax[0].plot(data[st:sp,0],df[st:sp],'r',linewidth=2,alpha=0.5)
+			ax[1].plot(rr[:,0],rr[:,1]*60,'+')
 			ax[0].legend()
 			
 			ax[1].set_xlabel('Time [s]')
@@ -831,7 +785,8 @@ class ECGAnalysis(object):
 		
 		return rr
 	
-	def CountAdv(self,data,t,debug=False):
+	@staticmethod
+	def CountAdv(data,debug=False):
 		"""
 		Implementation of Advanced Count Method from 
 		Axel Schafer, Karl Kratky.  "Estimation of Breathing Rate from Respiratory
@@ -841,25 +796,23 @@ class ECGAnalysis(object):
 		Parameters
 		----------
 		data : ndarray
-			Array of data of interest.  Originally used for R-R interval timings.
-		t : ndarray
-			Timings for data of interest
+			N by 2 array of timesteps and data.  Originally used for R-R interval timings.
 			
 		Returns
 		------
 		rr : ndarray
-			N-by-2 array of respiration frequencies (Beats per sec) and timings
+			N by 2 array of respiration timesteps and frequencies (beats per second)
 		"""
 		
 		#step 1 - bandpass filter with pass region between 0.1-0.5Hz
-		fs = 1/(t[1]-t[0]) #spline data frequency
+		fs = 1/(data[1,0]-data[0,0]) #spline data frequency
 		wl = 0.1/(0.5*fs) #low cutoff frequency as % of nyquist frequency
 		wh = 0.5/(0.5*fs) #high cutoff freq as % of nyquist freq
 		
 		b,a = signal.butter(5,[wl,wh],'bandpass') #filtfilt, -> order is 2x given
 		
-		data -= np.mean(data) #remove mean from data
-		df = signal.filtfilt(b,a,data) #apply filter to input data
+		data[:,1] -= np.mean(data[:,1]) #remove mean from data
+		df = signal.filtfilt(b,a,data[:,1]) #apply filter to input data
 		
 		#step 2 - find local minima and maxima of filtered data
 		# get 3rd quartile, threshold is Q3*0.2
@@ -869,7 +822,7 @@ class ECGAnalysis(object):
 		#step 3 - calculate absolute value diff. between subsequent local extrema
 		# 3rd quartile of differences, threshold = 0.1*Q3
 		ext,etp = zip(*sorted(zip(np.append(maxpt,minpt),\
-										[True]*len(maxpt)+[False]*len(minpt))))
+							[True]*len(maxpt)+[False]*len(minpt))))
 		ext,etp = np.array(ext),np.array(etp)
 		
 		ext_diff = np.zeros(len(ext)-1)
@@ -881,22 +834,17 @@ class ECGAnalysis(object):
 		
 		if debug==True:
 			f,ax = pl.subplots(2,figsize=(9,5),sharex=True)
-			ax[0].plot(t,df)
-			ax[0].plot(t[minpt],df[minpt],'k+')
-			ax[0].plot(t[maxpt],df[maxpt],'k+')
+			ax[0].plot(data[:,0],df)
+			ax[0].plot(data[minpt,0],df[minpt],'k+')
+			ax[0].plot(data[maxpt,0],df[maxpt],'k+')
 		
 		rem = 0 #removed indices counter
 		#step 4 - remove any sets whose difference is less than the threshold
 		for i in range(len(ext)-1):
-#			if ext_diff[i]<thr:
-#				ext[i],ext[i+1] = -1,-1 #set to negative index for easy removal later
 			if etp[i-rem] != etp[i-rem+1] and abs(df[ext[i-rem]]-df[ext[i-rem+1]])<thr:
 				ext = np.delete(ext,[i-rem,i-rem+1])
 				etp = np.delete(etp,[i-rem,i-rem+1])
 				rem += 2
-				
-#		etp = etp[np.argwhere(ext!=-1)].flatten() #remove sets less than threshold
-#		ext = ext[np.argwhere(ext!=-1)].flatten()
 		
 		#step 5 - breath cycles are now minimum -> maximum -> minimum = 1 cycle
 		brth_cyc = [] #initialize breath cycle array
@@ -919,16 +867,16 @@ class ECGAnalysis(object):
 			brth_cyc = brth_cyc_xnx
 			
 		for i in range(len(rr[:,0])):
-			rr[i] = [1/(t[brth_cyc[i][1]]-t[brth_cyc[i][0]]),\
-						 (t[brth_cyc[i][1]]+t[brth_cyc[i][0]])/2]
+			rr[i] = [(data[brth_cyc[i][1],0]+data[brth_cyc[i][0],0])/2\
+				 ,1/(data[brth_cyc[i][1],0]-data[brth_cyc[i][0],0])]
 		
 		if debug==True:
-			ax[0].plot(t[ext],df[ext],'ro',alpha=0.5,markersize=0.5)
+			ax[0].plot(data[ext,0],df[ext],'ro',alpha=0.5,markersize=0.5)
 			
 			for st,sp in brth_cyc:
-				ax[0].plot(t[st:sp],df[st:sp],'r',alpha=0.25,linewidth=5)
+				ax[0].plot(data[st:sp,0],df[st:sp],'r',alpha=0.25,linewidth=5)
 			
-			ax[1].plot(rr[:,1],rr[:,0]*60,'+',markersize=10)
+			ax[1].plot(rr[:,0],rr[:,1]*60,'+',markersize=10)
 			ax[1].set_ylabel('Breath Frequency [BPM]')
 			ax[0].set_ylabel('R-R peak time [s]')
 			ax[1].set_xlabel('Time [s]')
@@ -937,6 +885,58 @@ class ECGAnalysis(object):
 			f.subplots_adjust(hspace=0)
 		
 		return rr
+	
+	@staticmethod
+	def SmartModulationFusion(bw,am,fm,debug=False):
+		"""
+		Modulation smart fusion of bandwidth, AM, and FM respiratory estimates.
+		From Karlen et al, 2013.  Respiratory rate is output of standard deviation of 
+		estimated rate between BW, AM, and FM estimated rates is less than 4 BPM
+		
+		Parameters
+		---------
+		bw : ndarray
+			N by 2 array of respiratory rate estimations and timings via bandwidth parameter
+		am : ndarray
+			N by 2 array of respiratory rate estimations and timings via AM parameter
+		fm : ndarray
+			N by 2 array of respiratory rate estimations and timings via FM parameter
+		
+		Returns
+		-------
+		rr_est : ndarray
+			N by 2 array of respiratory rate estimates and timings
+		"""
+		#convert to BPM
+		bw[:,1] *= 60
+		am[:,1] *= 60
+		fm[:,1] *= 60
+		
+		bwsf = interpolate.CubicSpline(bw[:,0],bw[:,1])
+		amsf = interpolate.CubicSpline(am[:,0],am[:,1])
+		fmsf = interpolate.CubicSpline(fm[:,0],fm[:,1])
+		
+		tmin = min([bw[0,0],am[0,0],fm[0,0]])
+		tmax = min([bw[-1,0],am[-1,0],fm[-1,0]])
+		
+		x = np.arange(tmin,tmax,0.2)
+		
+		bws = bwsf(x)
+		ams = amsf(x)
+		fms = fmsf(x)
+		
+		st_dev = np.std(np.array([bws,ams,fms]),axis=0)
+		rr = np.ones_like(st_dev)*-1
+		
+		for i in range(len(st_dev)):
+			if st_dev[i]<4:
+				rr[i] = np.mean([bws[i],ams[i],fms[i]])
+		
+		rr_est = np.zeros((len(rr),2))
+		rr_est[:,1] = rr
+		rr_est[:,0] = x
+		
+		return rr_est
 
 t,v = np.genfromtxt('C:\\Users\\Lukas Adamowicz\\Dropbox\\Masters\\Project'+\
 				  '\\RespiratoryRate_HeartRate\\Python RRest\\sample_ecg.csv',\
@@ -947,21 +947,7 @@ t /= 1000
 v,t = v[250:int(len(v)/6)],t[250:int(len(v)/6)]
 #v,t = v[250:20000],t[250:20000]
 
-test = ECGAnalysis(500)
-v_1 = test.ElimLowFreq(v,debug=False)
-v_2 = test.ElimVeryHighFreq(v_1,debug=False)
-v_3 = test.ElimMainsFreq(v_2,debug=False)
-v_3c,l_inv = test.CheckLeadInversion(v_3,debug=False)
-v_4 = test.ElimSubCardiacFreq(v_3c,debug=False)
-
-v_d,t_d = test.DerivativeFilter(v_4,t)
-v_s = v_d**2
-v_i,t_i = test.IntegratedAverageFilter(v_s,t_d)
-
-rr8,tsn_i,tsn_f = test.FindPeaksLearning(v_4,t,v_i,v_d,debug=False)
-
-r_pk,q_tr = test.FindRPeaks(v_4,t,v_i,v_d,rr8,tsn_i,tsn_f,debug=False)
-bw,am,fm,fmt = test.RespRateExtraction(r_pk,q_tr)
-fmts,fms = test.FMSplineInterpolate(fm,fmt,debug=False)
-RR = test.CountOriginal(fms,fmts,debug=False)
-RR_adv = test.CountAdv(fms,fmts,debug=False)
+test = ECGAnalysis(500,v,t)
+test.FilterData()
+test.DetectRPeaks()
+test.EstimateRespRate()
