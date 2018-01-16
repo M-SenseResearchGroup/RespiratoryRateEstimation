@@ -120,7 +120,7 @@ class ECGAnalysis(object):
 		Bandwidth modulation, Amplitude modulation, Frequency modulation.
 		"""
 		s = timer()
-		self.FindPeaksLearning() #learning phase for finding R-peaks
+		self.FindPeaksLearning(debug=False) #learning phase for finding R-peaks
 		print(f'Find Peaks Learning: {timer()-s}')
 		s = timer()
 		
@@ -144,20 +144,20 @@ class ECGAnalysis(object):
 		Count method to obtain data for whole time sequence.
 		"""
 		s = timer()
-		self.rr_am = ECGAnalysis.CountAdv(self.ams,debug=True) #RR from AM parameter
+		self.rr_am = ECGAnalysis.CountAdv(self.ams,debug=False) #RR from AM parameter
 		print(f'AM advanced count: {timer()-s}')
 		s = timer()
 		
-		self.rr_fm = ECGAnalysis.CountAdv(self.fms,debug=True) #RR from FM parameter
+		self.rr_fm = ECGAnalysis.CountAdv(self.fms,debug=False) #RR from FM parameter
 		print(f'fm advanced count: {timer()-s}')
 		s = timer()
 		
-		self.rr_bw = ECGAnalysis.CountAdv(self.bws,debug=True) #RR from BW parameter
+		self.rr_bw = ECGAnalysis.CountAdv(self.bws,debug=False) #RR from BW parameter
 		print(f'bw advanced count: {timer()-s}')
 		s = timer()
 		
 		#Fuse estimates together
-		self.rr_est = ECGAnalysis.SmartModulationFusion(self.rr_bw,self.rr_am,self.rr_fm)
+		self.rr_est,self.lqi = ECGAnalysis.SmartModFusion(self.rr_bw,self.rr_am,self.rr_fm)
 		print(f'RR Fusion: {timer()-s}')
 		
 	#Step 1 - eliminate low frequencies
@@ -348,6 +348,13 @@ class ECGAnalysis(object):
 		self.v_int = (cs[N:]-cs[:-N])/N
 		self.t_int = self.t_der[N-1:]
 		
+		#append 0s in places where arrays were shortened
+		self.v_int = np.append([0]*(N+1),self.v_int)
+		self.v_int = np.append(self.v_int,[0,0])
+		
+		self.v_der = np.append([0]*2,self.v_der)
+		self.v_der = np.append(self.v_der,[0]*2)
+		
 		if plot==True:
 			pl.figure(figsize=(9,5))
 			pl.plot(self.t_int,self.v_int,label='Moving Average')
@@ -373,11 +380,6 @@ class ECGAnalysis(object):
 		n_25,n_125 = int(round(0.025*self.fs)),int(round(0.125*self.fs))
 		n_225 = int(round(0.225*self.fs))
 		n_lrn = int(round(self.tlearn*self.fs)) #number of samples in t_learn seconds
-		
-		#append 0s to front of integrated signal
-		self.v_int = np.append([0]*(len(self.v)-len(self.v_int)-2),self.v_int)
-		#number of 0s needs to be changed if different derivative scheme
-		self.v_der = np.append([0,0],self.v_der)
 		
 		v_f = self.v[:n_lrn] #want only beginning t_learn seconds
 		v_int = self.v_int[:n_lrn]
@@ -489,7 +491,7 @@ class ECGAnalysis(object):
 			ax[1].plot(r_t,r_v,'ro')
 			ax[1].plot(t_t,t_v,'go')
 			ax[1].axhline(self.tsn_f.t,linestyle='--',color='k')
-			ax.set_title('Find R-Peaks Learning')
+			ax[0].set_title('Find R-Peaks Learning')
 			pl.tight_layout()
 	
 	@staticmethod
@@ -572,12 +574,6 @@ class ECGAnalysis(object):
 		q_trs : ndarray
 			N-by-2 array of [q-trough timestamp, q-trough voltage]
 		"""
-		
-		self.v_der = np.append(self.v_der,[0,0])
-		self.v_der = np.append([0,0],self.v_der)
-		self.v_int = np.append(self.v_int,[0]*2) #append 2 zeros for derivative change
-		#append zeros to front for integration and d/dx change
-		self.v_int = np.append([0]*int(round(len(self.v)-len(self.v_int))),self.v_int)
 		
 		#number of samples in 25,125,225ms
 		n25,n125 = int(round(0.025*self.fs)),int(round(0.125*self.fs))
@@ -948,7 +944,7 @@ class ECGAnalysis(object):
 		return rr
 	
 	@staticmethod
-	def SmartModulationFusion(bw,am,fm,debug=False):
+	def SmartModFusion(bw,am,fm,use_given_time=True,plot=True):
 		"""
 		Modulation smart fusion of bandwidth, AM, and FM respiratory estimates.
 		From Karlen et al, 2013.  Respiratory rate is output of standard deviation of 
@@ -962,6 +958,10 @@ class ECGAnalysis(object):
 			N by 2 array of respiratory rate estimations and timings via AM parameter
 		fm : ndarray
 			N by 2 array of respiratory rate estimations and timings via FM parameter
+		use_given_time : bool
+			Use timings from BW/AM/FM data, or based on 0.2s timings.  Defaults to True.
+		plot : bool
+			Plot resulting data.  Defaults to True.
 		
 		Returns
 		-------
@@ -977,27 +977,42 @@ class ECGAnalysis(object):
 		amsf = interpolate.CubicSpline(am[:,0],am[:,1])
 		fmsf = interpolate.CubicSpline(fm[:,0],fm[:,1])
 		
-		tmin = min([bw[0,0],am[0,0],fm[0,0]])
-		tmax = min([bw[-1,0],am[-1,0],fm[-1,0]])
-		
-		x = np.arange(tmin,tmax,0.2)
+		if use_given_time==True:
+			x = np.unique(np.append(np.append(bw[:,0],am[:,0]),fm[:,0]))
+		else:
+			tmin = max([bw[0,0],am[0,0],fm[0,0]])
+			tmax = min([bw[-1,0],am[-1,0],fm[-1,0]])
+			x = np.arange(tmin,tmax,0.2)
+		lqi = np.array([False]*len(x)) #Low Quality Index
 		
 		bws = bwsf(x)
 		ams = amsf(x)
 		fms = fmsf(x)
 		
 		st_dev = np.std(np.array([bws,ams,fms]),axis=0)
-		rr = np.ones_like(st_dev)*-1
+		rr = np.mean(np.array([bws,ams,fms]),axis=0)
 		
 		for i in range(len(st_dev)):
-			if st_dev[i]<4:
-				rr[i] = np.mean([bws[i],ams[i],fms[i]])
+			if st_dev[i]>4:
+				lqi[i] = True #if Standard Dev > 4 BPM Low Quality Index
 		
 		rr_est = np.zeros((len(rr),2))
 		rr_est[:,1] = rr
 		rr_est[:,0] = x
 		
-		return rr_est
+		if plot==True:
+			f,ax = pl.subplots(figsize=(9,5))
+			ax.plot(rr_est[:,0],rr_est[:,1],label='Fused Est.')
+#			ax.plot(bw[:,0],bw[:,1],'--',alpha=0.5,label='BW Est.')
+#			ax.plot(am[:,0],am[:,1],'--',alpha=0.5,label='AM Est.')
+#			ax.plot(fm[:,0],fm[:,1],'--',alpha=0.5,label='FM Est.')
+			
+			ax.fill_between(x,rr-st_dev,rr+st_dev,alpha=0.5)
+			
+			ax.legend()
+			
+		
+		return rr_est,lqi
 
 t,v = np.genfromtxt('C:\\Users\\Lukas Adamowicz\\Dropbox\\Masters\\Project'+\
 				  '\\RespiratoryRate_HeartRate\\Python RRest\\sample_ecg.csv',\
