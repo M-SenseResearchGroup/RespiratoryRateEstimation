@@ -10,6 +10,8 @@ import numpy as np
 import matplotlib.pyplot as pl
 from scipy import signal, interpolate
 
+from timeit import default_timer as timer
+
 class TSN(object):
 	"""
 	Class for storing Threshold, Signal, Noise values for R-peak detection
@@ -83,41 +85,80 @@ class ECGAnalysis(object):
 		Perform all filtering steps in ECG data analysis
 		"""
 		
+		s = timer()
+		
 		self.ElimLowFreq() #Eliminate Low Frequencies
+		print(f'Eliminate Low Frequencies: {timer()-s}')
+		s = timer()
+		
 		self.ElimVeryHighFreq() #Eliminate High Frequencies
+		print(f'Eliminate Very High Frequencies: {timer()-s}')
+		s = timer()
+		
 		self.ElimMainsFreq() #Eliminate Mains frequency
+		print(f'Eliminate Mains Frequencies: {timer()-s}')
+		s = timer()
+		
 		self.CheckLeadInversion() #check for lead inversion
+		print(f'Check Lead Inversion: {timer()-s}')
+		s = timer()
+		
 		self.ElimSubCardiacFreq() #Eliminate sub-cardiac frequencies
+		print(f'Eliminate Sub-cardiac Frequencies: {timer()-s}')
+		s = timer()
 		
 		self.DerivativeFilter() #Take derivative and square it of filtered data
-		self.IntegratedAverageFilter() #Average by integration of squared derivative data
+		print(f'Derivative Filter: {timer()-s}')
+		s = timer()
+		
+		self.MovingAverageFilter() #Average by integration of squared derivative data
+		print(f'Moving Average Filter: {timer()-s}')
 	
 	def DetectRPeaks(self):
 		"""
 		Perform all steps in detecting R-peaks, and determining ECG HR parameters:
 		Bandwidth modulation, Amplitude modulation, Frequency modulation.
 		"""
-		
+		s = timer()
 		self.FindPeaksLearning() #learning phase for finding R-peaks
-		self.FindRPeaks(debug=True) #find R-peaks
+		print(f'Find Peaks Learning: {timer()-s}')
+		s = timer()
+		
+		self.FindRPeaks(debug=False) #find R-peaks
+		print(f'Find R-Peaks: {timer()-s}')
+		s = timer()
+		
 		self.RespRateExtraction() #extract AM,FM,BW parameters from R-peak values
+		print(f'Extract AM/FM/BW: {timer()-s}')
+		s = timer()
 		
 		self.fms = ECGAnalysis.SplineInterpolate(self.fm) #FM spline
 		self.ams = ECGAnalysis.SplineInterpolate(self.am) #AM spline
 		self.bws = ECGAnalysis.SplineInterpolate(self.bw) #BW spline
+		print(f'Spline Calculation: {timer()-s}')
+		s = timer()
 	
 	def EstimateRespRate(self):
 		"""
 		Perform all steps for respiratory rate estimation.  Currently uses Advanced 
 		Count method to obtain data for whole time sequence.
 		"""
-		
+		s = timer()
 		self.rr_am = ECGAnalysis.CountAdv(self.ams,debug=True) #RR from AM parameter
+		print(f'AM advanced count: {timer()-s}')
+		s = timer()
+		
 		self.rr_fm = ECGAnalysis.CountAdv(self.fms,debug=True) #RR from FM parameter
+		print(f'fm advanced count: {timer()-s}')
+		s = timer()
+		
 		self.rr_bw = ECGAnalysis.CountAdv(self.bws,debug=True) #RR from BW parameter
+		print(f'bw advanced count: {timer()-s}')
+		s = timer()
 		
 		#Fuse estimates together
 		self.rr_est = ECGAnalysis.SmartModulationFusion(self.rr_bw,self.rr_am,self.rr_fm)
+		print(f'RR Fusion: {timer()-s}')
 		
 	#Step 1 - eliminate low frequencies
 	def ElimLowFreq(self,debug=False):
@@ -137,6 +178,7 @@ class ECGAnalysis(object):
 			ax.plot(self.t,self.v,label='Step 1')
 			ax.set_xlabel('Time [s]')
 			ax.set_ylabel('Voltage [mV]')
+			ax.set_title('1 - Eliminate Low Frequencies')
 	
 	#Step 2 - Eliminate very high frequencies
 	def ElimVeryHighFreq(self,detrend=True,debug=False):
@@ -167,6 +209,7 @@ class ECGAnalysis(object):
 			ax.plot(self.t,self.v,label='Step 2')
 			ax.set_xlabel('Time [s]')
 			ax.set_ylabel('Voltage [mV]')
+			ax.set_title('2 - Eliminate very high frequencies')
 	
 	#Step 3 - Eliminate Mains frequency (frequency of electrical signals - 60Hz for US)
 	def ElimMainsFreq(self,detrend=True,debug=False):
@@ -197,6 +240,7 @@ class ECGAnalysis(object):
 			ax.plot(self.t,self.v,label='Step 3')
 			ax.set_xlabel('Time [s]')
 			ax.set_ylabel('Voltage [mV]')
+			ax.set_title('3 - Eliminate mains frequency')
 	
 	#Step 4 - Lead Inversion Check
 	def CheckLeadInversion(self,debug=False):
@@ -227,6 +271,7 @@ class ECGAnalysis(object):
 			ax.plot(x[d2_pks],self.v[d2_pks],'+')
 			ax.set_xlabel('Sample No.')
 			ax.set_ylabel('Voltage [mV]')
+			ax.set_title('4 - Check Lead Inversion')
 		
 		if p_neg_pks>=0.5:
 			self.v *= -1
@@ -253,6 +298,7 @@ class ECGAnalysis(object):
 			ax.legend()
 			ax.set_xlabel('Time [s]')
 			ax.set_ylabel('Voltage [mV]')
+			ax.set_title('Eliminate sub-cardiac frequencies')
 		
 		self.v_old = None #remove from memory
 	
@@ -281,30 +327,33 @@ class ECGAnalysis(object):
 			ax[1].legend()
 			f.tight_layout()
 			f.subplots_adjust(hspace=0)
+			ax.set_title('Derivative and squared filter')
 	
-	def IntegratedAverageFilter(self,plot=False):
+	def MovingAverageFilter(self,plot=False):
 		"""
-		Average by integration of squared data.
+		Moving average of squared data.
 		
 		Class Returns
 		-------------
 		v_int : ndarray
-			Average by integration resulting signal
+			Moving average resulting signal
 		t_int : ndarray
 			Timestamps for resulting average signal
 		"""
-		#number of samples to use for integration average window
+		#number of samples to use for moving average window
 		#window width in seconds/timestep
-		N = int((self.iaw/1000)/self.dt)
+		N = int(round((self.iaw/1000)/self.dt))
 		
-		self.v_int = (1/N)*np.array([sum(self.v_sq[i-N:i+1]) for i in range(N,len(self.v_sq))])
-		self.t_int = self.t_der[N:]
+		cs = np.cumsum(np.insert(self.v_sq,0,0))
+		self.v_int = (cs[N:]-cs[:-N])/N
+		self.t_int = self.t_der[N-1:]
 		
 		if plot==True:
 			pl.figure(figsize=(9,5))
-			pl.plot(self.t_der[N:],self.v_int,label='Integrated')
+			pl.plot(self.t_int,self.v_int,label='Moving Average')
 			pl.legend()
 			pl.xlabel('Time [s]')
+			pl.set_title('Moving average filter')
 		
 	def FindPeaksLearning(self,debug=False):
 		"""
@@ -319,10 +368,11 @@ class ECGAnalysis(object):
 		tsn_f : TSN
 			Filtered data thresholds and signal and noise moving averages
 		"""
-		n_dly = int(self.delay/1000*self.fs) #number of samples corresponding to delay
+		n_dly = int(round(self.delay/1000*self.fs)) #number of samples corresponding to delay
 		#number of samples in 25,125,225ms
-		n_25,n_125,n_225 = int(0.025*self.fs),int(0.125*self.fs),int(0.225*self.fs)
-		n_lrn = int(self.tlearn*self.fs) #number of samples in t_learn seconds
+		n_25,n_125 = int(round(0.025*self.fs)),int(round(0.125*self.fs))
+		n_225 = int(round(0.225*self.fs))
+		n_lrn = int(round(self.tlearn*self.fs)) #number of samples in t_learn seconds
 		
 		#append 0s to front of integrated signal
 		self.v_int = np.append([0]*(len(self.v)-len(self.v_int)-2),self.v_int)
@@ -335,7 +385,7 @@ class ECGAnalysis(object):
 		t_f = self.t[:n_lrn]
 		
 		#peaks in region with width equal to integration width
-		ii_pks = signal.argrelmax(v_int,order=int(0.5*self.iaw/1000/self.dt))[0] 
+		ii_pks = signal.argrelmax(v_int,order=int(round(0.5*self.iaw/1000/self.dt)))[0] 
 		
 		#remove any peaks that are less than 0.1% of mean of the peaks
 		ii_pks = ii_pks[np.where(v_int[ii_pks]>0.001*np.mean(v_int[ii_pks]))[0]]
@@ -439,6 +489,7 @@ class ECGAnalysis(object):
 			ax[1].plot(r_t,r_v,'ro')
 			ax[1].plot(t_t,t_v,'go')
 			ax[1].axhline(self.tsn_f.t,linestyle='--',color='k')
+			ax.set_title('Find R-Peaks Learning')
 			pl.tight_layout()
 	
 	@staticmethod
@@ -526,17 +577,18 @@ class ECGAnalysis(object):
 		self.v_der = np.append([0,0],self.v_der)
 		self.v_int = np.append(self.v_int,[0]*2) #append 2 zeros for derivative change
 		#append zeros to front for integration and d/dx change
-		self.v_int = np.append([0]*int(len(self.v)-len(self.v_int)),self.v_int)
+		self.v_int = np.append([0]*int(round(len(self.v)-len(self.v_int))),self.v_int)
 		
 		#number of samples in 25,125,225ms
-		n25,n125,n225 = int(0.025*self.fs),int(0.125*self.fs),int(0.225*self.fs)  
-		nw = int(self.iaw/1000*self.fs) #number of samples in integration window width
-		nd = int(self.delay/1000*self.fs) #number of samples in delay ms
+		n25,n125 = int(round(0.025*self.fs)),int(round(0.125*self.fs))
+		n225 = int(round(0.225*self.fs))
+		nw = int(round(self.iaw/1000*self.fs)) #number of samples in integration window width
+		nd = int(round(self.delay/1000*self.fs)) #number of samples in delay ms
 		
 		rr8_lim = np.zeros(8) #initialize limited R-R array
 		
 		#peak indices in region with width equal to integration window width
-		vi_pts = signal.argrelmax(self.v_int,order=int(0.5*self.iaw/1000/self.dt))[0]
+		vi_pts = signal.argrelmax(self.v_int,order=int(round(0.5*self.iaw/1000/self.dt)))[0]
 		#descending half peak value initilization.  Stores indices 
 		vi_hpt = np.zeros_like(vi_pts)
 		#maximum values and indices for each peak in filtered data
@@ -551,8 +603,9 @@ class ECGAnalysis(object):
 			#finding maximum slope in the +- width surrounding each peak
 			#if +- window is fully in data range
 			if vi_pts[i]-nw > 0 and vi_pts[i]+nw<len(self.v_int): 
-				m_pos[i+1] = [max(self.v_der[vi_pts[i]-nw:vi_pts[i]+nw])+int(vi_pts[i]-nw),\
-								 np.argmax(self.v_der[vi_pts[i]-nw:vi_pts[i]+nw])+int(vi_pts[i]-nw)]
+				m_pos[i+1] = [max(self.v_der[vi_pts[i]-nw:vi_pts[i]+nw])+\
+								 int(round(vi_pts[i]-nw)),np.argmax(self.v_der[vi_pts[i]-\
+									nw:vi_pts[i]+nw])+int(round(vi_pts[i]-nw))]
 			elif vi_pts[i]-nw < 0: #if the window goes before data range
 				m_pos[i+1] = [max(self.v_der[0:vi_pts[i]+nw]),\
 									 np.argmax(self.v_der[0:vi_pts[i]+nw])]
@@ -562,7 +615,7 @@ class ECGAnalysis(object):
 			
 			#finding descending half peak value
 			try:
-				vi_hpt[i] = np.where(self.v_int[vi_pts[i]:int(m_pos[i+1,1])+nd] \
+				vi_hpt[i] = np.where(self.v_int[vi_pts[i]:int(round(m_pos[i+1,1]))+nd] \
 											 <0.5*self.v_int[vi_pts[i]])[0][0] + vi_pts[i]
 				longwave=False #not a long QRS wave complex
 			except:
@@ -580,9 +633,9 @@ class ECGAnalysis(object):
 			#Determine type of peak (R,T, etc)
 			#if the peaks are above the thresholds and time between is greater than 0.36s		
 			if self.v_int[vi_pts[i]] > self.tsn_i.t and vf_pks[i,0] > self.tsn_f.t and \
-										(self.t[int(vf_pks[i,1])]-self.r_pks[-1,0])>=0.36:
-				self.r_pks = np.append(self.r_pks,[[self.t[int(vf_pks[i,1])],vf_pks[i,0]]]\
-											  ,axis=0)
+										(self.t[int(round(vf_pks[i,1]))]-self.r_pks[-1,0])>=0.36:
+				self.r_pks = np.append(self.r_pks,[[self.t[int(round(vf_pks[i,1]))],\
+											   vf_pks[i,0]]],axis=0)
 				j = i+1 #assign key value.  Index of the last detected r_peak
 				self.tsn_i,self.tsn_f = self._UpdateThresholds(self.v_int[vi_pts[i]],\
 												   self.r_pks[-1,1],self.tsn_i,self.tsn_f,signal=True)
@@ -593,8 +646,8 @@ class ECGAnalysis(object):
 				#if the maximum associated slope is greater than half the previous 
 				#detected R wave
 				if m_pos[i+1,0] > 0.5*m_pos[j,0]: #it is a R peak
-					self.r_pks = np.append(self.r_pks,[self.t[int(vf_pks[i,1])],vf_pks[i,0]]\
-											   ,axis=0)
+					self.r_pks = np.append(self.r_pks,[self.t[int(round(vf_pks[i,1]))],\
+											   vf_pks[i,0]],axis=0)
 					j = i+1
 					self.tsn_i,self.tsn_f = self._UpdateThresholds(self.v_int[vi_pts[i]],\
 													self.r_pks[-1,0],self.tsn_i,self.tsn_f,signal=True)
@@ -621,8 +674,9 @@ class ECGAnalysis(object):
 		for i in range(len(self.r_pks[:,0])):
 			i_rpk = np.where(self.t==self.r_pks[i,0])[0][0] #index of R-peak
 			#look in preceeding 0.1s of R-peak for the minimum
-			self.q_trs[i] = [self.t[np.argmin(self.v[i_rpk-int(0.1*self.fs):i_rpk])\
-							  +i_rpk-int(0.1*self.fs)],min(self.v[i_rpk-int(0.1*self.fs):i_rpk])]
+			self.q_trs[i] = [self.t[np.argmin(self.v[i_rpk-int(round(0.1*self.fs)):i_rpk])\
+							  +i_rpk-int(round(0.1*self.fs))],\
+								min(self.v[i_rpk-int(round(0.1*self.fs)):i_rpk])]
 		
 		if debug==True:
 			f,ax = pl.subplots(2,figsize=(9,5),sharex=True)
@@ -639,6 +693,8 @@ class ECGAnalysis(object):
 			ax[1].plot(self.t[vi_pts],self.v_int[vi_pts],'ro')
 			ax[1].legend(loc='best')
 			ax[1].set_xlabel('Time [s]')
+			
+			ax[0].set_title('Find R-Peaks')
 			
 			f.tight_layout()
 			f.subplots_adjust(hspace=0)
@@ -707,6 +763,7 @@ class ECGAnalysis(object):
 			pl.plot(data[:,0],data[:,1],'o',label='fm values')
 			pl.plot(xs,cs(xs),label='spline')
 			pl.legend()
+			pl.title('Spline Interpolation')
 		
 		return spl
 	
@@ -779,6 +836,8 @@ class ECGAnalysis(object):
 			ax[1].set_xlabel('Time [s]')
 			ax[1].set_ylabel('Resp. Rate [BPM]')
 			ax[0].set_ylabel('R-R peak times [s]')
+			
+			ax[0].set_title('Count Original')
 			
 			f.tight_layout()
 			f.subplots_adjust(hspace=0)
@@ -880,6 +939,8 @@ class ECGAnalysis(object):
 			ax[1].set_ylabel('Breath Frequency [BPM]')
 			ax[0].set_ylabel('R-R peak time [s]')
 			ax[1].set_xlabel('Time [s]')
+			
+			ax[0].set_title('Advanced Count')
 			
 			f.tight_layout()
 			f.subplots_adjust(hspace=0)
