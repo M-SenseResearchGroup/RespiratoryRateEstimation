@@ -51,7 +51,7 @@ class ECGAnalysis(object):
 		
 		self.nyq = 0.5*self.fs #Nyquist frequency is half sampling frequency
 		
-#		sc_cut=0.5,sc_N=4,int_avg_width=150,t_learn=8,delay=175
+#		int_avg_width=150,t_learn=8,delay=175
 		
 	def ElimLowFreq(self,cutoff=3,N=1,debug=False):
 		"""
@@ -214,28 +214,41 @@ class ECGAnalysis(object):
 		elif p_neg_pks<0.5:
 			self.lead_inv = False
 	
-	#Step 5 - Eliminate sub-cardiac frequencies
-	def ElimSubCardiacFreq(self,debug=False):
+	def ElimSubCardiacFreq(self,cutoff=0.5,N=4,debug=False):
 		"""
 		Step 5: Eliminate sub-cardiac frequencies (30 BPM - 0.5Hz)
+		
+		Parameters
+		----------
+		cutoff : float, int, optional
+			-3dB cutoff for high-pass filter.  Defaults to 0.5Hz
+		N : int, optional
+			Filter order for a double (forwards-backwards) linear filter.  
+			Defaults to 4
 		"""
-		self.v_old = self.v #store previous step data 
+		if debug==True:
+			self.v_old = self.v.copy()
 		
-		w_cut = self.sccut/self.f_nyq #define cutoff frequency as % of nyq. freq.
-		b,a = signal.butter(self.scN,w_cut,'highpass') #setup high pass filter
+		w_cut = cutoff/self.nyq #define cutoff frequency as % of nyq. freq.
+		b,a = signal.butter(N,w_cut,'highpass') #setup high pass filter
 		
-		self.v = signal.filtfilt(b,a,self.v_old) #backwards-forwards filter
+		for key in self.vd:
+			self.v[key] = signal.filtfilt(b,a,self.v[key])
 		
 		if debug==True:
-			f,ax = pl.subplots(figsize=(9,5))
-			ax.plot(self.t,self.v_old,label='Step 4')
-			ax.plot(self.t,self.v,label='Step 5')
-			ax.legend()
-			ax.set_xlabel('Time [s]')
-			ax.set_ylabel('Voltage [mV]')
-			ax.set_title('Eliminate sub-cardiac frequencies')
+			n = len(self.vd)
+			f,ax = pl.subplots(n,figsize=(16,8))
+			for i,key in zip(range(n),self.vd):
+				ax[i].plot(self.t[key],self.v_old[key],label='Step 4')
+				ax[i].plot(self.t[key],self.v[key],label='Step 5')
+				ax[i].set_xlabel('Time [s]')
+				ax[i].set_ylabel('Voltage [mV]')
+				ax[i].legend(title=f'{key}')
+			ax[0].set_title('5 - Eliminate Sub-Cardiac Frequencies')
+			pl.tight_layout()
 		
-		self.v_old = None #remove from memory
+		if self.v_old != None:
+			self.v_old = None #remove from memory
 	
 	def DerivativeFilter(self,plot=False):
 		"""
