@@ -1,6 +1,6 @@
 """
-V0.1
-September 12/29/2017
+V0.2.0
+January 19, 2018
 
 Lukas Adamowicz
 
@@ -12,7 +12,13 @@ from scipy import signal, interpolate
 
 from timeit import default_timer as timer
 
-class TSN(object):
+# TODO remove this when done testing
+class EcgData:
+	def __init__(self):
+		self.t = dict()
+		self.v = dict()
+		
+class TSN:
 	"""
 	Class for storing Threshold, Signal, Noise values for R-peak detection
 	"""
@@ -22,199 +28,113 @@ class TSN(object):
 		self.npk = None #noise peak moving average
 
 class ECGAnalysis(object):
-	def __init__(self,fs,v,t,low_cut=3,low_N=1,vh_cut=20,vh_N=1,main_cut=60,main_Q=10,\
-			  sc_cut=0.5,sc_N=4,int_avg_width=150,t_learn=8,delay=175):
+	def __init__(self,master):
 		"""
 		Class defining steps for analyzing ECG data to obtain an estimation 
 		of Respiratory Rate.
 		
 		Parameters
 		---------
-		fs : float
-			Sampling frequency [Hz] of input data
-		v : ndarray
-			Voltage [V, mV] signal from ECG Lead II
-		t : ndarray
-			Timestamps [s] for voltage signal
-		low_cut : float, int, optional
-			High-pass filter -3 dB cutoff for eliminating low frequencies.  Defaults to 3 Hz
-		low_N : int, optional
-			High-pass filter order divided by 2, since forwards-backwards filter.  
-			Defaults to 1
-		vh_cut : float, int, optional
-			Low-pass filter -3 dB cutoff for eliminating very high frequencies.  
-			Defaults to 20 Hz
-		vh_N : int, optional
-			Low-pass filter order divided by 2, Defaulst to 1
-		main_cut : float, int, optional
-			Cutoff for mains frequency elimination (electrical signals).  60 Hz in US
-			50 Hz in Europe.  Defaults to 60 Hz
-		main_Q : int, optional
-			Quality of filter for mains elimination.  Defaults to 10
-		sc_cut : float, int, optional
-			Sub-cardiac frequency elimination -3 dB cutoff.  Defaults to 0.5 Hz
-		sc_N : int, optional
-			Sub-cardiac high-pass frequency order divided by 2.  Defaults to 4
-		int_avg_width : int, optional
-			Average by integration window width in milliseconds [ms].  Defaults to 150
-		t_learn : float, int
-			Time [s] for threshold learning for R-peak detection.  Defaults to 8s
-		delay : float, int
-			Time [ms] for descending half-peak not being found and setting descending
-			half-peak time.  Defaults to 175ms
+		master : EcgData
+			EcgData class (DataStructures) with voltage and timing dictionaries for
+			desired events to be analyzed
 		"""
+		self.v = master.v #should reference the same data so no duplicates
+		self.t = master.t
 		
-		self.fs = fs
-		self.f_nyq = 0.5*self.fs #nyquist frequency is half sampling frequency
-		self.v = v
-		self.t = t
-		self.lcut = low_cut
-		self.lN = low_N
-		self.vhcut = vh_cut
-		self.vhN = vh_N
-		self.mcut = main_cut
-		self.mQ = main_Q
-		self.sccut = sc_cut
-		self.scN = sc_N
-		self.iaw = int_avg_width
-		self.tlearn = t_learn
-		self.delay = delay
-	
-	def FilterData(self):
+		self.vd = list(master.v.keys())
+		self.td = list(master.t.keys()) #these 2 should be the same
+		
+		#calculate sampling frequency
+		self.fs = round(1/(self.t[self.td[0]][1] - self.t[self.td[0]][0]))
+		master.fs = self.fs #assign this to master for possible future use
+		
+		self.nyq = 0.5*self.fs #Nyquist frequency is half sampling frequency
+		
+#		sc_cut=0.5,sc_N=4,int_avg_width=150,t_learn=8,delay=175
+		
+	def ElimLowFreq(self,cutoff=3,N=1,debug=False):
 		"""
-		Perform all filtering steps in ECG data analysis
-		"""
-		
-		s = timer()
-		
-		deb = False
-		
-		self.ElimLowFreq(debug=deb) #Eliminate Low Frequencies
-		print(f'Eliminate Low Frequencies: {timer()-s}')
-		s = timer()
-		
-		self.ElimVeryHighFreq(debug=deb) #Eliminate High Frequencies
-		print(f'Eliminate Very High Frequencies: {timer()-s}')
-		s = timer()
-		
-		self.ElimMainsFreq(debug=deb) #Eliminate Mains frequency
-		print(f'Eliminate Mains Frequencies: {timer()-s}')
-		s = timer()
-		
-		self.CheckLeadInversion(debug=deb) #check for lead inversion
-		print(f'Check Lead Inversion: {timer()-s}')
-		s = timer()
-		
-		self.ElimSubCardiacFreq(debug=deb) #Eliminate sub-cardiac frequencies
-		print(f'Eliminate Sub-cardiac Frequencies: {timer()-s}')
-		s = timer()
-		
-		self.DerivativeFilter() #Take derivative and square it of filtered data
-		print(f'Derivative Filter: {timer()-s}')
-		s = timer()
-		
-		self.MovingAverageFilter() #Average by integration of squared derivative data
-		print(f'Moving Average Filter: {timer()-s}')
-	
-	def DetectRPeaks(self):
-		"""
-		Perform all steps in detecting R-peaks, and determining ECG HR parameters:
-		Bandwidth modulation, Amplitude modulation, Frequency modulation.
-		"""
-		s = timer()
-		self.FindPeaksLearning(debug=True) #learning phase for finding R-peaks
-		print(f'Find Peaks Learning: {timer()-s}')
-		s = timer()
-		
-		self.FindRPeaks(debug=True) #find R-peaks
-		print(f'Find R-Peaks: {timer()-s}')
-		s = timer()
-		
-		self.RespRateExtraction() #extract AM,FM,BW parameters from R-peak values
-		print(f'Extract AM/FM/BW: {timer()-s}')
-		s = timer()
-		
-		self.fms = ECGAnalysis.SplineInterpolate(self.fm) #FM spline
-		self.ams = ECGAnalysis.SplineInterpolate(self.am) #AM spline
-		self.bws = ECGAnalysis.SplineInterpolate(self.bw) #BW spline
-		print(f'Spline Calculation: {timer()-s}')
-		s = timer()
-	
-	def EstimateRespRate(self):
-		"""
-		Perform all steps for respiratory rate estimation.  Currently uses Advanced 
-		Count method to obtain data for whole time sequence.
-		"""
-		s = timer()
-		self.rr_am = ECGAnalysis.CountAdv(self.ams,debug=True) #RR from AM parameter
-		print(f'AM advanced count: {timer()-s}')
-		s = timer()
-		
-		self.rr_fm = ECGAnalysis.CountAdv(self.fms,debug=True) #RR from FM parameter
-		print(f'fm advanced count: {timer()-s}')
-		s = timer()
-		
-		self.rr_bw = ECGAnalysis.CountAdv(self.bws,debug=True) #RR from BW parameter
-		print(f'bw advanced count: {timer()-s}')
-		s = timer()
-		
-		#Fuse estimates together
-		self.rr_est,self.lqi = ECGAnalysis.SmartModFusion(self.rr_bw,self.rr_am,self.rr_fm)
-		print(f'RR Fusion: {timer()-s}')
-		
-	#Step 1 - eliminate low frequencies
-	def ElimLowFreq(self,debug=False):
-		"""
-		Step 1: Eliminate low frequencies for ECG data using a high-pass filter
-		"""
-		self.v_old = self.v #store previous step's voltage for reference
-			
-		w_cut = self.lcut/self.f_nyq #cutoff frequency as percentage of nyquist frequency
-		
-		b,a = signal.butter(self.lN,w_cut,'highpass') #setup highpass filter
-		self.v = signal.filtfilt(b,a,self.v_old) #filtered voltage data after Step 1
-		
-		if debug==True:
-			f,ax = pl.subplots(figsize=(9,5))
-			ax.plot(self.t,self.v_old,label='initial')
-			ax.plot(self.t,self.v,label='Step 1')
-			ax.set_xlabel('Time [s]')
-			ax.set_ylabel('Voltage [mV]')
-			ax.set_title('1 - Eliminate Low Frequencies')
-	
-	#Step 2 - Eliminate very high frequencies
-	def ElimVeryHighFreq(self,detrend=True,debug=False):
-		"""
-		Step 2: Eliminate very high frequencies for ECG data using a low-pass filter
-		Must be run after "ElimLowFreq" function is run
+		Step 1: Eliminate low frequencies for ECG data using a high-pass filter.
 		
 		Parameters
 		---------
+		cutoff : float, int, optional
+			-3dB high-pass filter cutoff frequency in Hz.  Defaults to 3Hz
+		N : int, optional
+			Filter order for a double (forwards-backwards) linear filter.  
+			Defaults to 1
+		"""
+		if debug==True:
+			self.v_old = self.v.copy() #store previous step's voltage for reference
+			
+		w_cut = cutoff/self.nyq #cutoff frequency as percentage of nyquist frequency
+		
+		b,a = signal.butter(N,w_cut,'highpass') #setup highpass filter
+		
+		#perform filtering on the data
+		for key in self.vd:
+			self.v[key] = signal.filtfilt(b,a,self.v_old[key]) 
+		
+		if debug==True:
+			n = len(self.vd)
+			f,ax = pl.subplots(n,figsize=(16,8))
+			for i,key in zip(range(n),self.vd):
+				ax[i].plot(self.t[key],self.v_old[key],label='initial')
+				ax[i].plot(self.t[key],self.v[key],label='Step 1')
+				ax[i].set_xlabel('Time [s]')
+				ax[i].set_ylabel('Voltage [mV]')
+				ax[i].legend(title=f'{key}')
+			ax[0].set_title('1 - Eliminate Low Frequencies')
+			pl.tight_layout()
+	
+	def ElimVeryHighFreq(self,cutoff=20,N=1,detrend=True,debug=False):
+		"""
+		Step 2: Eliminate very high frequencies for ECG data using a low-pass filter
+		Should be run after "ElimLowFreq" function is run
+		
+		Parameters
+		---------
+		cutoff : float, int, optional
+			-3dB cutoff for low-pass filter.  Defaults to 20Hz.
+		N : int, optional
+			Filter order for a double (forwards-backwards) linear filter.  
+			Defaults to 1
 		detrend : bool, optional
 			Detrend data.  Defaults to True
 		"""
-		self.v_old = self.v
-		w_cut = self.vhcut/self.f_nyq #cutoff frequency as percentage of nyquist frequency
+		if debug==True:
+			#copy old voltages for reference/debugging
+			self.v_old = self.v.copy()
+			
+		#cutoff frequency as percentage of nyquist frequency	
+		w_cut = cutoff/self.nyq
 		
-		b,a = signal.butter(self.vhN,w_cut,'lowpass') #setup filter parameters
+		#setup filter parameters
+		b,a = signal.butter(N,w_cut,'lowpass') 
 		
-		#detrend - remove mean, linear associations
-		if detrend==True:
-			data_det = signal.detrend(self.v_old) #detrend data
-			self.v = signal.filtfilt(b,a,data_det) #filter detrended data
-		else:
-			self.v = signal.filtfilt(b,a,self.v_old) #filter input data
+		for key in self.vd:
+			#detrend - remove mean, linear associations
+			if detrend==True:
+				data_det = signal.detrend(self.v[key])
+				self.v[key] = signal.filtfilt(b,a,data_det)
+			else:
+				#filter input data
+				self.v[key] = signal.filtfilt(b,a,self.v[key])
 			
 		if debug==True:
-			f,ax = pl.subplots(figsize=(9,5))
-			ax.plot(self.t,self.v_old,label='Step 1')
-			ax.plot(self.t,self.v,label='Step 2')
-			ax.set_xlabel('Time [s]')
-			ax.set_ylabel('Voltage [mV]')
-			ax.set_title('2 - Eliminate very high frequencies')
+			n = len(self.vd)
+			f,ax = pl.subplots(n,figsize=(16,8))
+			for i,key in zip(range(n),self.vd):
+				ax[i].plot(self.t[key],self.v_old[key],label='Step 1')
+				ax[i].plot(self.t[key],self.v[key],label='Step 2')
+				ax[i].set_xlabel('Time [s]')
+				ax[i].set_ylabel('Voltage [mV]')
+				ax[i].legend(title=f'{key}')
+			ax[0].set_title('2 - Eliminate Very High Frequencies')
+			pl.tight_layout()
 	
-	#Step 3 - Eliminate Mains frequency (frequency of electrical signals - 60Hz for US)
-	def ElimMainsFreq(self,detrend=True,debug=False):
+	def ElimMainsFreq(self,cutoff=60,Q=10,detrend=True,debug=False):
 		"""
 		Step 3: Eliminate Mains frequency caused by electronics.
 		60Hz in Americas.  50Hz in Europe.
@@ -222,27 +142,38 @@ class ECGAnalysis(object):
 		
 		Parameters
 		---------
+		cutoff : float, int, optional
+			-3dB cutoff for notch filter.  Defaults to 60Hz (US).
+		Q : int, optional
+			Filter quality for double (forwards-backwards) linear filter.
+			Defaults to 10.
 		detrend : bool, optional
 			Detrend data.  Defaults to True
 		"""
-		self.v_old = self.v #store previous step data
+		if debug==True:
+			self.v_old = self.v.copy() 
 		
-		w0 = self.mcut/self.f_nyq
-		b,a = signal.iirnotch(w0,self.mQ)
+		w0 = cutoff/self.nyq
+		b,a = signal.iirnotch(w0,Q)
 		
-		if detrend==True:
-			data_det = signal.detrend(self.v_old) #detrend data
-			self.v = signal.filtfilt(b,a,data_det) #filter detrended data
-		else:
-			self.v = signal.filtfilt(b,a,self.v_old) #detrend input data
+		for key in self.vd:
+			if detrend==True:
+				data_det = signal.detrend(self.v[key])
+				self.v[key] = signal.filtfilt(b,a,data_det)
+			else:
+				self.v[key] = signal.filtfilt(b,a,self.v[key])
 		
 		if debug==True:
-			f,ax = pl.subplots(figsize=(9,5))
-			ax.plot(self.t,self.v_old,label='Step 2')
-			ax.plot(self.t,self.v,label='Step 3')
-			ax.set_xlabel('Time [s]')
-			ax.set_ylabel('Voltage [mV]')
-			ax.set_title('3 - Eliminate mains frequency')
+			n = len(self.vd)
+			f,ax = pl.subplots(n,figsize=(16,8))
+			for i,key in zip(range(n),self.vd):
+				ax[i].plot(self.t[key],self.v_old[key],label='Step 2')
+				ax[i].plot(self.t[key],self.v[key],label='Step 3')
+				ax[i].set_xlabel('Time [s]')
+				ax[i].set_ylabel('Voltage [mV]')
+				ax[i].legend(title=f'{key}')
+			ax[0].set_title('3 - Eliminate Mains Frequencies')
+			pl.tight_layout()
 	
 	#Step 4 - Lead Inversion Check
 	def CheckLeadInversion(self,debug=False):
@@ -1017,29 +948,19 @@ class ECGAnalysis(object):
 		
 		return rr_est,lqi
 
-t,v = np.genfromtxt('C:\\Users\\Lukas Adamowicz\\Dropbox\\Masters\\Project'+\
-				  '\\RespiratoryRate_HeartRate\\Python RRest\\sample_ecg.csv',\
+#s = timer()
+
+fprefix = 'C:\\Users\\Lukas Adamowicz'+\
+	  '\\Dropbox\\Masters\\Project\\RespiratoryRate_HeartRate\\Python RRest\\'
+data = EcgData()
+data.t['middle'],data.v['middle'] = np.genfromtxt(fprefix+'middle_ecg.csv',\
 				  skip_header=0,unpack=True,delimiter=',')
 
-#narrow middle position
-start = np.where(t<=1509041360629)[0][-1]
-stop = np.where(t>=1509041663407)[0][0]
+data.t['back'],data.v['back'] = np.genfromtxt(fprefix+'back_ecg.csv',\
+				  skip_header=0,unpack=True,delimiter=',')
 
-#narrow back position
-#start = 1509041996888
-#stop = 1509042297391
+data.t['forward'],data.v['forward'] = np.genfromtxt(fprefix+'forward_ecg.csv',\
+				  skip_header=0,unpack=True,delimiter=',')
 
-#narrow forward position
-#start = 1509043155605
-#stop = 1509043456128
-
-v,t = v[start:stop],t[start:stop]
-#v,t = v[250:20000],t[250:20000]
-
-t -= t[0]
-t /= 1000
-
-test = ECGAnalysis(500,v,t)
-test.FilterData()
-test.DetectRPeaks()
-test.EstimateRespRate()
+test = ECGAnalysis(data)
+#print(f'Import/Setup time: {timer()-s:.5f} s')
