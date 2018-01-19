@@ -74,7 +74,7 @@ class ECGAnalysis(object):
 		
 		#perform filtering on the data
 		for key in self.vd:
-			self.v[key] = signal.filtfilt(b,a,self.v_old[key]) 
+			self.v[key] = signal.filtfilt(b,a,self.v[key]) 
 		
 		if debug==True:
 			n = len(self.vd)
@@ -175,7 +175,6 @@ class ECGAnalysis(object):
 			ax[0].set_title('3 - Eliminate Mains Frequencies')
 			pl.tight_layout()
 	
-	#Step 4 - Lead Inversion Check
 	def CheckLeadInversion(self,debug=False):
 		"""
 		Step 4: Check for lead inversion by examining percentage of local 
@@ -183,7 +182,7 @@ class ECGAnalysis(object):
 		Run after ElimMainsFreq
 		"""
 		
-		d2 = self.v**2 #square data for all positive and prominent peaks
+		d2 = self.v[self.vd[0]]**2 #square data for all positive and prominent peaks
 		d2_max = max(d2) #maximum of squared data
 		d2_max_pks = np.zeros_like(d2) #allocate array for peaks
 		
@@ -192,22 +191,25 @@ class ECGAnalysis(object):
 		d2_max_pks[inds] = d2[inds] #squared values greater than 20% max, 0s elsewhere
 		d2_pks = signal.argrelmax(d2_max_pks)[0] #locations of maximum peaks
 		
-		d_pks = self.v[d2_pks] #data values at local extrema (found from squard values)
+		#data values at local extrema (found from squard values)
+		d_pks = self.v[self.vd[0]][d2_pks]
 		
 		#percentage of peaks with values that are negative
 		p_neg_pks = len(np.where(d_pks<0)[0])/len(d_pks) 
 		
 		if debug==True:
-			x = np.array([i for i in range(len(self.v))])
+			x = np.array([i for i in range(len(self.v[self.vd[0]]))])
 			f,ax = pl.subplots(figsize=(9,5))
-			ax.plot(x,self.v)
-			ax.plot(x[d2_pks],self.v[d2_pks],'+')
+			ax.plot(x,self.v[self.vd[0]])
+			ax.plot(x[d2_pks],self.v[self.vd[0]][d2_pks],'+')
 			ax.set_xlabel('Sample No.')
 			ax.set_ylabel('Voltage [mV]')
 			ax.set_title('4 - Check Lead Inversion')
-		
+			pl.tight_layout()
+			
 		if p_neg_pks>=0.5:
-			self.v *= -1
+			for key in self.vd:
+				self.v[key] *= -1
 			self.lead_inv = True
 		elif p_neg_pks<0.5:
 			self.lead_inv = False
