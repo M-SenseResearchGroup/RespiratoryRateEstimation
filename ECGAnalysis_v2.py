@@ -278,14 +278,17 @@ class ECGAnalysis(object):
 		for key in self.vd:
 			self.v_der[key] = (-self.v[key][:-4]-2*self.v[key][1:-3]+2*self.v[key][3:-1]\
 									 +self.v[key][4:])/(8*self.dt)
-			self.t_der[key] = self.t[key][2:-2] #timsteps are cut by 2 on either end
-		
-			self.v_sq[key] = self.v_der[key]**2
+			self.t_der[key] = self.t[key][:-2]*1
+			self.t_der[key][:2] = 0 #timsteps are cut by 2 on either end
+#			self.t_der[key][-2:] = 0
+			
+			self.v_der[key] = np.insert(self.v_der[key],0,[0]*2)
+#			self.v_der[key] = np.append(self.v_der[key],[0]*2)
 		
 		if debug==True:
 			f,ax = pl.subplots(2,figsize=(9,5),sharex=True)
-			ax[0].plot(self.t_der[key],self.v_der[key],label='Derivative')
-			ax[1].plot(self.t_der[key],self.v_sq[key],label='Squared')
+			ax[0].plot(self.t_der[key][2:],self.v_der[key][:-2],label='Derivative')
+			ax[1].plot(self.t_der[key][2:],self.v_der[key][:-2]**2,label='Squared')
 			ax[0].legend()
 			ax[1].legend()
 			f.tight_layout()
@@ -305,23 +308,64 @@ class ECGAnalysis(object):
 		"""
 		#number of samples to use for moving average window
 		#window width in seconds/timestep
-		N = int(round((self.mfl/1000)/self.dt))
+		self.mfl_n = int(round((self.mfl/1000)/self.dt))
 		
-		self.v_int = dict()
-		self.t_int = dict()
+		self.v_ma = dict()
+		self.t_ma = dict()
 		for key in self.vd:
 			#take preceding cumulative sum [1,2,3] -> [1,3,6]
-			cs = np.cumsum(np.insert(self.v_sq[key],0,0))
-			self.v_int[key] = (cs[N:]-cs[:-N])/N
+			cs = np.cumsum(self.v_der[key][1:]**2)
+			self.v_ma[key] = (cs[self.mfl_n:]-cs[:-self.mfl_n])/self.mfl_n
 			#Array is shortened by N-1 entries by above operation
-			self.t_int[key] = self.t_der[key][N-1:]
+			self.t_ma[key] = self.t_der[key][self.mfl_n-1:]
+			
+			#add zeros back in to shortened arrays
+			#adding n-1(moving average) + 2 (derivative) = n+1
+			self.v_ma[key] = np.insert(self.v_ma[key],0,[0]*(self.mfl_n+1))
+#			self.v_int[key] = np.append(self.v_int[key],[0]*2)
+			self.t_ma[key] = np.insert(self.t_ma[key],0,[0]*(self.mfl_n-1))
 		
 		if debug==True:
 			f,ax = pl.subplots(figsize=(16,5))
-			ax.plot(self.t_int[key],self.v_int[key],label='Moving Average')
+			ax.plot(self.t_ma[key][self.mfl_n+1:],self.v_ma[key][self.mfl_n+1:],\
+					   label='Moving Average')
 			ax.legend()
 			ax.set_xlabel('Time [s]')
 			ax.set_title('Moving average filter example')
+	
+	def DetectRPeaks(self,debug=False):
+		"""
+		Detect R-peaks in the filtered ECG signal
+		"""
+		
+		#numer of samples in delay time
+		ndly = int(round(self.delay/1000*self.fs))
+		#number of samples in 25,125,225ms
+		n25 = int(round(0.025*self.fs))
+		n125 = int(round(0.125*self.fs))
+		n225 = int(round(0.225*self.fs))
+		
+		#find peaks in moving average data with moving average length buffer
+		ma_pks = signal.argrelmax(self.v_ma,order=self.mfl_n*0.5)
+		#remove any peaks less than 0.1% of mean
+		ma_pks = ma_pks[np.where(self.v_ma[i_pks]>0.001*np.mean(self.v_ma[ma_pks]))[0]]
+		
+		#store moving average times and values of peaks
+		va_pks = self.v_ma[ma_pks]
+		ta_pks = self.t_ma[ma_pks]
+		
+		m_pos = [] #allocate for maximum positive slope around average signal peaks
+		hpk = [] #allocate for descending half-peaks
+		fpk = [] #allocate for filtered data peaks
+		rpk_b = [] #allocate for R-peak (true) or not (false)
+		
+		for i,mpk in zip(range(len(ma_pks)),ma_pks):
+			#append maximum positive slope with +- delay time of peak
+			m_pos.append(max(self.v_der[mpk-ndly if mpk-ndly>0 else 0:mpk+ndly]))
+			#search for descending half-peak value
+			try:
+				hpk.append(np.where(self.v_ma[mpk:ma_pks[i+1]]<0.5*va_pks[i])[0][0])
+				longwave = False #
 		
 	def FindPeaksLearning(self,debug=False):
 		"""
