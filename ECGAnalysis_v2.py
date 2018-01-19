@@ -28,7 +28,7 @@ class TSN:
 		self.npk = None #noise peak moving average
 
 class ECGAnalysis(object):
-	def __init__(self,master):
+	def __init__(self,master,moving_filter_len=150,delay=175):
 		"""
 		Class defining steps for analyzing ECG data to obtain an estimation 
 		of Respiratory Rate.
@@ -38,9 +38,17 @@ class ECGAnalysis(object):
 		master : EcgData
 			EcgData class (DataStructures) with voltage and timing dictionaries for
 			desired events to be analyzed
+		moving_filter_len : float, int, optional
+			Trailing length of the moving filter in ms.  Defaults to 150ms
+		delay : float, int, optional
+			Delay in ms to wait before declaring descending half-peak.
+			Defaults to 175ms
 		"""
 		self.v = master.v #should reference the same data so no duplicates
 		self.t = master.t
+		
+		self.mfl = moving_filter_len
+		self.delay = delay
 		
 		self.vd = list(master.v.keys())
 		self.td = list(master.t.keys()) #these 2 should be the same
@@ -50,8 +58,6 @@ class ECGAnalysis(object):
 		master.fs = self.fs #assign this to master for possible future use
 		
 		self.nyq = 0.5*self.fs #Nyquist frequency is half sampling frequency
-		
-#		int_avg_width=150,t_learn=8,delay=175
 		
 	def ElimLowFreq(self,cutoff=3,N=1,debug=False):
 		"""
@@ -246,38 +252,47 @@ class ECGAnalysis(object):
 				ax[i].legend(title=f'{key}')
 			ax[0].set_title('5 - Eliminate Sub-Cardiac Frequencies')
 			pl.tight_layout()
-		
-		if self.v_old != None:
+			
+		try:
 			self.v_old = None #remove from memory
+		except:
+			pass
 	
-	def DerivativeFilter(self,plot=False):
+	def DerivativeFilter(self,debug=False):
 		"""
-		Calculated derivative of filtered data, as well as squaring data before next step
+		Calculated derivative of filtered data, 
+		as well as squaring data before next step
 		
 		Class Results
 		-------------
-		v_der : ndarray
-			Derivative of filtered voltage signal data
-		t_der : ndarray
-			Timestamps for derivative voltage data
+		v_der : dict
+			Derivative of filtered voltage signal data for each activity
+		t_der : dict
+			Timestamps for derivative voltage data for each activity
 		"""
-		self.dt = self.t[1]-self.t[0] #timestep
-		self.v_der = (-self.v[:-4]-2*self.v[1:-3]+2*self.v[3:-1]+self.v[4:])/(8*self.dt)
-		self.t_der = self.t[2:-2] #timsteps are cut short by 2 on either end
+		self.v_der = dict()
+		self.t_der = dict()
+		self.v_sq = dict()
+		self.dt = 1/self.fs #timestep
 		
-		self.v_sq = self.v_der**2
+		for key in self.vd:
+			self.v_der[key] = (-self.v[key][:-4]-2*self.v[key][1:-3]+2*self.v[key][3:-1]\
+									 +self.v[key][4:])/(8*self.dt)
+			self.t_der[key] = self.t[key][2:-2] #timsteps are cut by 2 on either end
 		
-		if plot==True:
+			self.v_sq[key] = self.v_der[key]**2
+		
+		if debug==True:
 			f,ax = pl.subplots(2,figsize=(9,5),sharex=True)
-			ax[0].plot(self.t_der,self.v_der,label='Derivative')
-			ax[1].plot(self.t_der,self.v_sq,label='Squared')
+			ax[0].plot(self.t_der[key],self.v_der[key],label='Derivative')
+			ax[1].plot(self.t_der[key],self.v_sq[key],label='Squared')
 			ax[0].legend()
 			ax[1].legend()
 			f.tight_layout()
 			f.subplots_adjust(hspace=0)
-			ax.set_title('Derivative and squared filter')
+			ax[0].set_title('Derivative and squared filter example')
 	
-	def MovingAverageFilter(self,plot=False):
+	def MovingAverageFilter(self,debug=False):
 		"""
 		Moving average of squared data.
 		
@@ -290,25 +305,23 @@ class ECGAnalysis(object):
 		"""
 		#number of samples to use for moving average window
 		#window width in seconds/timestep
-		N = int(round((self.iaw/1000)/self.dt))
+		N = int(round((self.mfl/1000)/self.dt))
 		
-		cs = np.cumsum(np.insert(self.v_sq,0,0))
-		self.v_int = (cs[N:]-cs[:-N])/N
-		self.t_int = self.t_der[N-1:]
+		self.v_int = dict()
+		self.t_int = dict()
+		for key in self.vd:
+			#take preceding cumulative sum [1,2,3] -> [1,3,6]
+			cs = np.cumsum(np.insert(self.v_sq[key],0,0))
+			self.v_int[key] = (cs[N:]-cs[:-N])/N
+			#Array is shortened by N-1 entries by above operation
+			self.t_int[key] = self.t_der[key][N-1:]
 		
-		#append 0s in places where arrays were shortened
-		self.v_int = np.append([0]*(N+1),self.v_int)
-		self.v_int = np.append(self.v_int,[0,0])
-		
-		self.v_der = np.append([0]*2,self.v_der)
-		self.v_der = np.append(self.v_der,[0]*2)
-		
-		if plot==True:
-			pl.figure(figsize=(9,5))
-			pl.plot(self.t_int,self.v_int,label='Moving Average')
-			pl.legend()
-			pl.xlabel('Time [s]')
-			pl.set_title('Moving average filter')
+		if debug==True:
+			f,ax = pl.subplots(figsize=(16,5))
+			ax.plot(self.t_int[key],self.v_int[key],label='Moving Average')
+			ax.legend()
+			ax.set_xlabel('Time [s]')
+			ax.set_title('Moving average filter example')
 		
 	def FindPeaksLearning(self,debug=False):
 		"""
