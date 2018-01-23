@@ -23,9 +23,9 @@ class TSN:
 	Class for storing Threshold, Signal, Noise values for R-peak detection
 	"""
 	def __init__(self):
-		self.thr = None #threshold
-		self.spk = None #signal peak moving average
-		self.npk = None #noise peak moving average
+		self.t = 0.0 #threshold
+		self.s = 0.0 #signal peak moving average
+		self.n = 0.0 #noise peak moving average
 
 class ECGAnalysis(object):
 	def __init__(self,master,moving_filter_len=150,delay=175):
@@ -58,6 +58,16 @@ class ECGAnalysis(object):
 		master.fs = self.fs #assign this to master for possible future use
 		
 		self.nyq = 0.5*self.fs #Nyquist frequency is half sampling frequency
+	
+	def TestFunctions(self):
+		self.ElimLowFreq()
+		self.ElimVeryHighFreq()
+		self.ElimMainsFreq()
+		self.CheckLeadInversion()
+		self.ElimSubCardiacFreq()
+		self.DerivativeFilter()
+		self.MovingAverageFilter()
+		self.DetectRPeaks(debug=True)
 		
 	def ElimLowFreq(self,cutoff=3,N=1,debug=False):
 		"""
@@ -345,169 +355,229 @@ class ECGAnalysis(object):
 		n125 = int(round(0.125*self.fs))
 		n225 = int(round(0.225*self.fs))
 		
-		#find peaks in moving average data with moving average length buffer
-		ma_pks = signal.argrelmax(self.v_ma,order=self.mfl_n*0.5)
-		#remove any peaks less than 0.1% of mean
-		ma_pks = ma_pks[np.where(self.v_ma[i_pks]>0.001*np.mean(self.v_ma[ma_pks]))[0]]
+		self.r_pks = dict() #allocate dictionary for R-peaks
+		self.q_trs = dict() #allocate dictionary for Q-troughs (for resp rate paramters)
 		
-		#store moving average times and values of peaks
-		va_pks = self.v_ma[ma_pks]
-		ta_pks = self.t_ma[ma_pks]
-		
-		m_pos = [] #allocate for maximum positive slope around average signal peaks
-		hpk = [] #allocate for descending half-peaks
-		fpk = [] #allocate for filtered data peaks
-		rpk_b = [] #allocate for R-peak (true) or not (false)
-		
-		for i,mpk in zip(range(len(ma_pks)),ma_pks):
-			#append maximum positive slope with +- delay time of peak
-			m_pos.append(max(self.v_der[mpk-ndly if mpk-ndly>0 else 0:mpk+ndly]))
-			#search for descending half-peak value
-			try:
-				hpk.append(np.where(self.v_ma[mpk:ma_pks[i+1]]<0.5*va_pks[i])[0][0])
-				longwave = False #
-		
-	def FindPeaksLearning(self,debug=False):
+		for key in self.vd:
+			#peak indices in region with width equal to moving average width
+			va_pts = signal.argrelmax(self.v_ma[key],order=int(round(0.5*self.mfl_n)))[0]
+			#remove any points that are less than 0.1% of the mean of the peaks
+			va_pts = va_pts[np.where(self.v_ma[key][va_pts] > \
+							0.001*np.mean(self.v_ma[key][va_pts]))[0]]
+			#descending half-peak value allocation
+			hpt = np.zeros_like(va_pts)
+			#maximum values and indices for filtered data
+			vf_pks = np.zeros((len(va_pts),2))
+			
+			#maximum slopes and indices for each peak
+			m_pos = np.zeros((len(va_pts),2))
+			
+			for i in range(len(va_pts)):
+				#finding maximum slope in the +- width surrounding peaks
+				i1 = va_pts[i]-self.mfl_n if va_pts[i]-self.mfl_n > 0 else 0
+				i2 = va_pts[i]+self.mfl_n if va_pts[i]+self.mfl_n<=len(self.v_der[key]) \
+					else len(self.v_der[key])
+				m_pos[i] = [max(self.v_der[key][i1:i2])+va_pts[i]-self.mfl_n,\
+									np.argmax(self.v_der[key][i1:i2])+i1]
+			
+				#find descending half-peak value in moving average data
+				try:
+					hpt[i] = np.where(self.v_ma[key][va_pts[i]:va_pts[i]+ndly]\
+										  <0.5*self.v_ma[key][va_pts[i]])[0][0] + va_pts[i]
+					longwave = False #half peak found => not a long QRS complex
+				except:
+					hpt[i] = m_pos[i,1] + ndly
+					longwave = True #half peak not found => long QRS complex
+				
+				#find maximum values in filtered data preceeding descending half-peak in 
+				#moving average data
+				if longwave==False: #if not a long wave search preceeding 225 to 125 ms
+					i1 = hpt[i]-n225 if hpt[i]-n225>0 else 0
+					i2 = hpt[i]-n125
+					vf_pks[i] = [max(self.v[key][i1:i2]),np.argmax(self.v[key][i1:i2])+i1]
+				elif longwave==True: #if long wave, search preceeding 250 to 150 ms
+					i1 = hpt[i]-n225-n25 if hpt[i]-n225-n25>0 else 0
+					i2 = hpt[i]-n125-n25
+					vf_pks[i] = [max(self.v[key][i1:i2]),np.argmax(self.v[key][i1:i2])+i1]
+
+			sntf = TSN() #signal/Noise thresholds for filtered data
+			snta = TSN() #signal/Noise thresholds for moving average data
+			sntf.t = 0.125*np.median(vf_pks[:,0]) #initialize thresholds with 1/8 of median
+			snta.t = 0.125*np.median(self.v_ma[key][va_pts])
+			
+			r_pk_b = np.full_like(hpt,False,dtype=bool) #store if peak is R-peak (T) or not (F)
+			#Determine the type of peak (R,T,etc) for learning phase (9 peaks->8 RR times)
+			k = 1 #loop counter
+			j = k #last detected R-peak counter
+			nrpk = 0 #keep count for first 8 R-peaks (threshold learning)
+			while nrpk < 9:
+				#Are the moving average and filtered peaks above the thresholds
+				if vf_pks[k,0] > sntf.t and self.v_ma[key][va_pts[k]] > snta.t:
+					#is this peak more than 0.36s away from the last R-peak?
+					if (vf_pks[k,1]-vf_pks[j,1])*self.dt > 0.36:
+						r_pk_b[k] = True #r-peak was detected
+						nrpk += 1 #update number found for learning
+						j = k #update last found r-peak index
+						if nrpk == 1: #change the thresholds to values based on the R-peak
+							sntf.t = 0.125*vf_pks[k,0]
+							snta.t = 0.125*self.v_ma[key][va_pts[k]]
+						#Update all the signal/noise/threshold values
+						self._UpdateThresholds(self.v_ma[key][va_pts[k]],vf_pks[k,0],\
+													 snta,sntf,signal=True)
+					#is this peak more than 0.2s but less than 0.36s away from last R-peak?
+					elif (vf_pks[k,1]-vf_pks[j,1])*self.dt > 0.2:
+						#is the slope of this peak greater than half the slope of the last R-peak?
+						if m_pos[k,0] > 0.5*m_pos[j,0]:
+							r_pk_b[k] = True
+							nrpk += 1
+							j = k
+							if nrpk == 1:
+								sntf.t = 0.125*vf_pks[k,0]
+								snta.t = 0.125*self.v_ma[key][va_pts[k]]
+							self._UpdateThresholds(self.v_ma[key][va_pts[k]],vf_pks[k,0],\
+													 snta,sntf,signal=True)
+					#check for duplicate points, don't want to double count for updating thresholds
+					elif (vf_pks[k,1]-vf_pks[j,1])*self.dt ==0:
+						pass
+					#if the peak was less than 0.2s away from the last R-peak, it is noise
+					else:
+						self._UpdateThresholds(self.v_ma[key][va_pts[k]],vf_pks[k,0],\
+													 snta,sntf,signal=False)
+				#if the peak was not above the thresholds, it is noise
+				else:
+					self._UpdateThresholds(self.v_ma[key][va_pts[k]],vf_pks[k,0],\
+													 snta,sntf,signal=False)
+				k += 1
+			
+			#calculate initial learning RR times
+			rr8 = self.t[key][vf_pks[r_pk_b,1][1:].astype(int)] - \
+						self.t[key][vf_pks[r_pk_b,1][:-1].astype(int)]  
+			rr8_lim = rr8.copy() #initialize limited R-R array with normal R-R array
+			
+			#determe if the peaks are R-peaks or other
+			for i in range(k,len(va_pts)):
+				#Is the point greater than moving thresholds?
+				if vf_pks[i,0] > sntf.t and self.v_ma[key][va_pts[i]] > snta.t:
+					#is the time difference between consecutive peaks greater than 0.36s
+					if (vf_pks[i,1]-vf_pks[j,1])*self.dt > 0.36:
+						r_pk_b[i] = True
+						#if the time interval to last R-peak is greater than 166% of the limited average
+						if (vf_pks[i,1]-vf_pks[j,1])*self.dt > 1.66*np.mean(rr8_lim):
+							index,snta,sntf = self._SearchForPeak(self.v_ma[key][va_pts[j:i]],\
+								   vf_pks[j:i,0],m_pos[j:i,0],self.t[key][vf_pks[j:i,1].astype(int)],snta,sntf)
+							if index != []:
+								index = np.array(index) + j
+								rr8,rr8_lim = self._UpdateAvgRR(self.t[key][int(vf_pks[i,1])]\
+														-self.t[key][int(vf_pks[index[-1],1])],rr8,rr8_lim)
+								r_pk_b[index] = True
+						else:
+							rr8,rr8_lim = self._UpdateAvgRR(self.t[key][int(vf_pks[i,1])]\
+													   -self.t[key][int(vf_pks[j,1])],rr8,rr8_lim)
+						j = i
+						self._UpdateThresholds(self.v_ma[key][va_pts[i]],vf_pks[i,0],\
+													 snta,sntf,signal=True)
+					#is the time difference between 0.2 and 0.36s?
+					elif (vf_pks[i+1,1]-vf_pks[j,1])*self.dt > 0.2:
+						#is the slope greater than 50% of previous R-peak slope?
+						if m_pos[i,0] > 0.5*m_pos[j,0]:
+							r_pk_b[i] = True
+							rr8,rr8_lim = self._UpdateAvgRR(self.t[key][int(vf_pks[i,1])]\
+													   -self.t[key][int(vf_pks[j,1])],rr8,rr8_lim)
+							self._UpdateThresholds(self.v_ma[key][va_pts[i]],vf_pks[i,0],\
+													 snta,sntf,signal=True)
+							j = i
+					#check for duplicate points, don't want to double count
+					elif (vf_pks[i+1,1]-vf_pks[j,1])*self.dt == 0:
+						pass
+					#if the peak is less than 0.2s away from last R-peak, it is noise
+					else:
+						self._UpdateThresholds(self.v_ma[key][va_pts[i]],vf_pks[i,0],\
+													 snta,sntf,signal=False)
+				#if the peak is not above the thresholds, it is noise
+				else:
+					self._UpdateThresholds(self.v_ma[key][va_pts[i]],vf_pks[i,0],\
+													 snta,sntf,signal=False)
+			
+			self.r_pks[key] = np.zeros((len(np.argwhere(r_pk_b)),2)) #allocate R-peak array
+			self.r_pks[key][:,0] = self.t[key][vf_pks[r_pk_b,1].astype(int)] #set timings
+			self.r_pks[key][:,1] = vf_pks[r_pk_b,0] #set peak values
+			
+			self.q_trs[key] = np.zeros_like(self.r_pks[key]) #allocate Q-trough array
+			
+			for i in range(len(self.r_pks[key][:,0])):
+				#determing index for R-peak
+				i_rpk = np.where(self.t[key]==self.r_pks[key][i,0])[0][0]
+				#search in preceeding 0.1s for minimum value
+				i_qtr = np.argmin(self.v[key][i_rpk-int(round(0.1*self.fs)):i_rpk]) + \
+										i_rpk-int(round(0.1*self.fs))
+				#set time of minimum value, as well as value itself for Q-trough
+				self.q_trs[key][i] = [self.t[key][i_qtr],self.v[key][i_qtr]]
+										 
+			
+			if debug==True:
+				f,ax = pl.subplots(2,figsize=(14,5),sharex=True)
+				ax[0].plot(self.t[key],self.v[key])
+				ax[1].plot(self.t_ma[key][self.mfl_n:],self.v_ma[key][self.mfl_n:])
+				
+				ax[0].plot(self.t[key][vf_pks[r_pk_b,1].astype(int)],vf_pks[r_pk_b,0],'bo')
+				ax[0].plot(self.t[key][vf_pks[:,1].astype(int)],vf_pks[:,0],'r+')
+				ax[1].plot(self.t_ma[key][hpt],self.v_ma[key][hpt],'ro')
+				ax[1].plot(self.t_ma[key][va_pts],self.v_ma[key][va_pts],'ko')
+				
+				f.tight_layout()
+				f.subplots_adjust(hspace=0)					
+	
+	def _SearchForPeak(self,a_pks,f_pks,slp,t,snta,sntf):
 		"""
-		Learning function for R-peak detection.
+		Search in abnormally large R-peak to R-peak interval for missed R-peaks
 		
-		Class Returns
-		-------
-		rr8 : float
-			Initial average R-R peak times
-		tsn_i : TSN
-			Integrated data thresholds and signal and noise moving averages
-		tsn_f : TSN
-			Filtered data thresholds and signal and noise moving averages
+		Parameters
+		----------
+		a_pks : array
+			Moving average value local maxima between previously detected R-peaks
+		f_pks : array
+			Filtered value peaks between previously detected R-peaks
+		slp : array
+			Slope values between previously detected R-peaks
+		t : array
+			Time values between previously detected R-peaks
+		snta : TSN
+			Moving average signal/noise/threshold values
+		sntf : TSN
+			Filtered signal/noise/threshold values
+		
+		Returns
+		------
+		k : array, None
+			Indices of detected R-peaks or None
+		snta : TSN
+			Updated moving average signal/noise/threshold values
+		sntf : TSN
+			Updated filtered signal/noise/threshold values
 		"""
-		n_dly = int(round(self.delay/1000*self.fs)) #number of samples corresponding to delay
-		#number of samples in 25,125,225ms
-		n_25,n_125 = int(round(0.025*self.fs)),int(round(0.125*self.fs))
-		n_225 = int(round(0.225*self.fs))
-		n_lrn = int(round(self.tlearn*self.fs)) #number of samples in t_learn seconds
-		
-		v_f = self.v[:n_lrn] #want only beginning t_learn seconds
-		v_int = self.v_int[:n_lrn]
-		v_der = self.v_der[:n_lrn]
-		t_f = self.t[:n_lrn]
-		
-		#peaks in region with width equal to integration width
-		ii_pks = signal.argrelmax(v_int,order=int(round(0.5*self.iaw/1000/self.dt)))[0] 
-		
-		#remove any peaks that are less than 0.1% of mean of the peaks
-		ii_pks = ii_pks[np.where(v_int[ii_pks]>0.001*np.mean(v_int[ii_pks]))[0]]
-		
-		#get integrated signal values
-		vi_pks = v_int[ii_pks]
-		ti_pks = t_f[ii_pks]
-		
-		m_pos = [] #maximum positive slope in the t_delay region around each peak (+- t_delay)
-		pki_h = [] #descending half peak value points
-		band_pk = [] #max points in v_f preceeding descending half peak value points
-		
-		r_pk_b = [] #Boolean array for if the point is an R peak or not
-		
-		for i in range(len(ii_pks)):
-			#append max slope for each peak
-			m_pos.append(max(v_der[ii_pks[i]-n_dly if ii_pks[i]-n_dly>=0 else 0\
-						  :ii_pks[i]+n_dly])) 
-			try: #to find descending half peak value for each peak
-				pki_h.append(np.where(v_int[ii_pks[i]:]<0.5*vi_pks[i])[0][0]+ii_pks[i])
-				longwave = False #not a long QRS wave
-			except: #if not found, set integration half peak value to max slope + delay
-				pki_h.append(np.argmax(v_der[ii_pks[i]-n_dly if ii_pks[i]-n_dly>0 else 0\
-								 :ii_pks[i]+n_dly])+ (ii_pks[i]-n_dly) + n_dly)
-				longwave = True
-			
-			if longwave==False: #search for max filt. peak in preceeding 125-225 ms
-				band_pk.append(np.argmax(v_f[pki_h[i]-n_225 if pki_h[i]-n_225>0 else 0\
-								 :pki_h[i]-n_125])+pki_h[i]-n_225)
-			elif longwave==True: #if longwave, search in preceeding 150-250ms
-				band_pk.append(np.argmax(v_f[pki_h[i]-n_225-n_25 if pki_h[i]-n_225-n_25>0 else 0\
-								 :pki_h[i]-n_125-n_25])+pki_h[i]-n_225-n_25)
-		band_pk = np.array(band_pk)
-		#determing if R peak or T wave
-		for i in range(0,len(ii_pks) if len(ii_pks)%2==0 else len(ii_pks)-1,2):
-			#if time between peaks is less than 200ms, first is R, second is T
-			#Due to being faster than physiologically possible
-			if t_f[band_pk[i+1]]-t_f[band_pk[i]]<0.2:
-				r_pk_b.append([True,False])
-			#if time between peaks is less than 360ms but greater than 200ms
-			elif t_f[band_pk[i+1]]-t_f[band_pk[i]]<0.36:
-				#then check the slope.  If slope i is twice as steep as slope i+1, 
-				#point i is the qrs complex, point i+1 a t complex
-				if 0.5*m_pos[i] > m_pos[i+1]:
-					r_pk_b.append([True,False])
-				#if slope i is less than half as steep as slope i+1, 
-				#then i+1 is a qrs complex, i a t-wave
-				elif m_pos[i] < 0.5*m_pos[i+1]:
-					r_pk_b.append([False,True])
-				#if neither slope is smaller than half the other, they are both qrs complexes
-				elif 0.5*m_pos[i] < m_pos[i+1] and m_pos[i] > 0.5*m_pos[i+1]:
-					r_pk_b.append([True,True])
-			#if time between peaks is greater than 360ms, both are qrs peaks
-			elif t_f[band_pk[i+1]]-t_f[band_pk[i]]>0.36:
-				r_pk_b.append([True,True])
-		
-		#assign r-peak values and timings, as well as t-wave values and timings		
-		r_v = v_f[band_pk[np.argwhere(np.array(r_pk_b).flatten()==True).flatten()]]
-		r_t = t_f[band_pk[np.argwhere(np.array(r_pk_b).flatten()==True).flatten()]]
-		t_v = v_f[band_pk[np.argwhere(np.array(r_pk_b).flatten()==False).flatten()]]
-		t_t = t_f[band_pk[np.argwhere(np.array(r_pk_b).flatten()==False).flatten()]]
-		
-		#Create R-R average arrays
-		if len(r_t)<=8:
-			self.rr8 = np.ones(8)*r_t[1]-r_t[0]
-			self.rr8[-len(r_t)+1:] = np.array(r_t[1:])-np.array(r_t[:-1])
-		elif len(r_t)>8:
-			self.rr8 = np.array(r_t[len(r_t)-8:])-np.array(r_t[len(r_t)-9:-1])
-		
-		self.tsn_i = TSN() #tsn for integrated data
-		self.tsn_f = TSN() #tsn for filtered data
-		
-		#initialize signal peak for integrated data
-		self.tsn_i.spk = 0.125*vi_pks[np.where(v_f[band_pk]==r_v[0])[0][0]]
-		#initialize noise peak for integrated data
-		self.tsn_i.npk = 0.125*vi_pks[np.where(v_f[band_pk]==t_v[0])[0][0]]
-		self.tsn_f.spk = 0.125*r_v[0] #initialize signal peak for filtered data
-		self.tsn_f.npk = 0.125*t_v[0] #initialize noise peak for filtered data
-		
-		for i in range(1,len(r_v)):
-			self.tsn_i.spk = 0.125*vi_pks[np.where(v_f[band_pk]==r_v[i])[0][0]]\
-					 + 0.875*self.tsn_i.spk
-					 
-			self.tsn_i.npk = 0.125*vi_pks[np.where(v_f[band_pk]==t_v[0])[0][0]]\
-					 + 0.875*self.tsn_i.npk
-					 
-			self.tsn_f.spk = 0.125*r_v[i] + 0.875*self.tsn_f.spk
-			self.tsn_f.npk = 0.125*t_v[i] + 0.875*self.tsn_f.npk
-			
-			#threshold for integrated data
-			self.tsn_i.t = self.tsn_i.npk + 0.25*(self.tsn_i.spk-self.tsn_i.npk)
-			#threshold for filtered data 
-			self.tsn_f.t = self.tsn_f.npk + 0.25*(self.tsn_f.spk-self.tsn_f.npk) 
-			
-		if debug==True:
-			f,ax = pl.subplots(2,figsize=(9,5),sharex=True)
-			ax[0].plot(self.t,self.v_int)
-			ax[0].plot(ti_pks,vi_pks,'o')
-			ax[0].plot(self.t[pki_h],self.v_int[pki_h],'o')
-			ax[0].axhline(self.tsn_i.t,linestyle='--',color='k')
-			ax[1].plot(self.t,self.v)
-			ax[1].plot(r_t,r_v,'ro')
-			ax[1].plot(t_t,t_v,'go')
-			ax[1].axhline(self.tsn_f.t,linestyle='--',color='k')
-			ax[0].set_title('Find R-Peaks Learning')
-			pl.tight_layout()
+		k = []
+		j = 0
+		for i in range(1,len(a_pks)):
+			if a_pks[i] > 0.5*snta.t and f_pks[i] > 0.5*sntf.t:
+				if t[i] - t[j] > 0.36:
+					k.append(i)
+					j = i
+					self._UpdateThresholds(a_pks[i],f_pks[i],snta,sntf,signal=True,searchback=True)
+				elif t[i] - t[j] > 0.2:
+					if slp[i] > 0.5*slp[j]:
+						k.append(i)
+						j = i
+						self._UpdateThresholds(a_pks[i],f_pks[i],snta,sntf,signal=True,searchback=True)
+		return k, snta, sntf
 	
 	@staticmethod
-	def _UpdateAvgRR(rr_int,rr8,rr8_lim):
+	def _UpdateAvgRR(rr_t,rr8,rr8_lim):
 		"""
 		Update R-R 8 value storage arrays for R-peak detection
 		
 		Parameters
 		---------
-		rr_int : float
+		rr_t : float
 			R-R time in seconds
 		rr8 : list of floats
 			List/array of last 8 R-R times in seconds
@@ -521,185 +591,58 @@ class ECGAnalysis(object):
 		rr8_lim : list of floats
 			Updated list/array of last 8 R-R times that were between 92-116% of avg(rr8)
 		"""
-		if rr_int>0.92*np.mean(rr8) and rr_int<1.16*np.mean(rr8):
+		if rr_t>0.92*np.mean(rr8) and rr_t<1.16*np.mean(rr8):
 			rr8_lim[:-1] = rr8_lim[1:]
-			rr8_lim[-1] = rr_int
+			rr8_lim[-1] = rr_t
 			
 		rr8[:-1] = rr8[1:] #move values down 1 (ie remove oldest)
-		rr8[-1] = rr_int #insert newest value in last spot in list/array
+		rr8[-1] = rr_t #insert newest value in last spot in list/array
 		
 		return rr8, rr8_lim
 	
 	@staticmethod
-	def _UpdateThresholds(i_peak,f_peak,tsn_i,tsn_f,signal=True):
+	def _UpdateThresholds(ma_peak,f_peak,tsn_ma,tsn_f,signal=True,searchback=False):
 		"""
 		Update thresholds for R-peak detection
 		
 		Parameters
 		----------
-		i_peak : float
-			Integrated signal peak
+		ma_peak : float
+			Moving average signal peak
 		f_peak : float
 			Filtered signal peak
-		tsn_i : TSN
-			Threshold, signal and noise moving averages for integrated data
+		tsn_ma : TSN
+			Threshold, signal and noise moving averages for moving average data
 		tsn_f : TSN
-			Threshold, signal and noise moving averages for integrated data
-		signal : bool
-			Is the peak data provided a signal(True) or noise(False) peak.  Defaults to True
+			Threshold, signal and noise moving averages for filtered data
+		signal : bool, optional
+			Is the peak data provided a signal(True) or noise(False) peak?  Defaults to True
+		searchback : bool, optional
+			Is the peak data from searching a large R-peak interval?  Defaults to False
 			
 		Returns
 		-------
-		tsn_i : TSN
-			Updated threshold, signal and noise moving averages for integrated data
+		tsn_ma : TSN
+			Updated threshold, signal and noise moving averages for moving average data
 		tsn_f : TSN
-			Updated threshold, signal and noise moving averages for integrated data
+			Updated threshold, signal and noise moving averages for filtered data
 		"""
+		
 		if signal==True:
-			tsn_i.spk = 0.125*i_peak + 0.875*tsn_i.spk #update integrated signal peak value
-			tsn_f.spk = 0.125*f_peak + 0.875*tsn_f.spk #update filtered signal peak value
+			if searchback==False:
+				tsn_ma.s = 0.125*ma_peak + 0.875*tsn_ma.s #update moving average signal peak value
+				tsn_f.s = 0.125*f_peak + 0.875*tsn_f.s #update filtered signal peak value
+			elif searchback==False:
+				tsn_ma.s = 0.25*ma_peak + 0.75*tsn_ma.s
+				tsn_f.s = 0.125*f_peak + 0.75*tsn_f.s
 		elif signal==False:
-			tsn_i.npk = 0.125*i_peak+ 0.875*tsn_i.npk #update integrated noise peak value
-			tsn_f.npk = 0.125*f_peak + 0.875*tsn_f.npk #update filtered noise peak value
+			tsn_ma.n = 0.125*ma_peak+ 0.875*tsn_ma.n #update moving average noise peak value
+			tsn_f.n = 0.125*f_peak + 0.875*tsn_f.n #update filtered noise peak value
 
-		tsn_i.t = tsn_i.npk + 0.25*(tsn_i.spk-tsn_i.npk) #update integrated signal threshold
-		tsn_f.t = tsn_f.npk + 0.25*(tsn_f.spk-tsn_f.npk) #update filtered signal threshold
+		tsn_ma.t = tsn_ma.n + 0.25*(tsn_ma.s-tsn_ma.n) #update moving average signal threshold
+		tsn_f.t = tsn_f.n + 0.25*(tsn_f.s-tsn_f.n) #update filtered signal threshold
 		
-		return tsn_i,tsn_f
-	
-	def FindRPeaks(self,debug=False):
-		"""
-		Algorithm implementation to find R-peaks in ECG of Hamilton and Tompkins, 1986.  
-		"Quantitative Investigation of QRS Detection Rules Using the 
-		MIT/BIH Arrhythmia Database"
-		
-		Class Returns
-		-------
-		r_pks : ndarray
-			N-by-2 array of [r-peak timestamp,r-peak voltage]
-		q_trs : ndarray
-			N-by-2 array of [q-trough timestamp, q-trough voltage]
-		"""
-		
-		#number of samples in 25,125,225ms
-		n25,n125 = int(round(0.025*self.fs)),int(round(0.125*self.fs))
-		n225 = int(round(0.225*self.fs))
-		nw = int(round(self.iaw/1000*self.fs)) #number of samples in integration window width
-		nd = int(round(self.delay/1000*self.fs)) #number of samples in delay ms
-		
-		rr8_lim = np.zeros(8) #initialize limited R-R array
-		
-		#peak indices in region with width equal to integration window width
-		vi_pts = signal.argrelmax(self.v_int,order=int(round(0.5*self.iaw/1000/self.dt)))[0]
-		#descending half peak value initilization.  Stores indices 
-		vi_hpt = np.zeros_like(vi_pts)
-		#maximum values and indices for each peak in filtered data
-		vf_pks = np.zeros((len(vi_pts),2))
-		
-		#maximum slopes and indices for each peak.  
-		#Initialized as +1 due to comparison with previous slope later
-		m_pos = np.zeros((len(vi_pts)+1,2))
-		self.r_pks = np.zeros((1,2)) #initialize vector for R peak values and timestamps
-		
-		for i in range(len(vi_pts)):
-			#finding maximum slope in the +- width surrounding each peak
-			#if +- window is fully in data range
-			if vi_pts[i]-nw > 0 and vi_pts[i]+nw<len(self.v_int): 
-				m_pos[i+1] = [max(self.v_der[vi_pts[i]-nw:vi_pts[i]+nw])+\
-								 int(round(vi_pts[i]-nw)),np.argmax(self.v_der[vi_pts[i]-\
-									nw:vi_pts[i]+nw])+int(round(vi_pts[i]-nw))]
-			elif vi_pts[i]-nw < 0: #if the window goes before data range
-				m_pos[i+1] = [max(self.v_der[0:vi_pts[i]+nw]),\
-									 np.argmax(self.v_der[0:vi_pts[i]+nw])]
-			elif vi_pts[i]+nw > len(self.v_int): #if the window goes outside end of data range
-				m_pos[i+1] = [max(self.v_der[vi_pts[i]-nw:]),\
-									 np.argmax(self.v_der[vi_pts[i]-nw:])]
-			
-			#finding descending half peak value
-			try:
-				vi_hpt[i] = np.where(self.v_int[vi_pts[i]:int(round(m_pos[i+1,1]))+nd] \
-											 <0.5*self.v_int[vi_pts[i]])[0][0] + vi_pts[i]
-				longwave=False #not a long QRS wave complex
-			except:
-				vi_hpt[i] = vi_pts[i] + nd
-				longwave=True #long QRS wave complex
-			
-			#find maximum values in filtered data preceeding descending half peak values
-			if longwave==False: #if not a long wave search preceeding 225 to 125ms
-				vf_pks[i] = [max(self.v[vi_hpt[i]-n225:vi_hpt[i]-n125]),\
-								  np.argmax(self.v[vi_hpt[i]-n225:vi_hpt[i]-n125])+vi_hpt[i]-n225]
-			elif longwave==True: #if long wave, search preceeding 250 to 150 ms
-				vf_pks[i] = [max(self.v[vi_hpt[i]-n225-n25:vi_hpt[i]-n125-n25]),\
-					  np.argmax(self.v[vi_hpt[i]-n225-n25:vi_hpt[i]-n125-n25])+vi_hpt[i]-n225-n25]
-				
-			#Determine type of peak (R,T, etc)
-			#if the peaks are above the thresholds and time between is greater than 0.36s		
-			if self.v_int[vi_pts[i]] > self.tsn_i.t and vf_pks[i,0] > self.tsn_f.t and \
-										(self.t[int(round(vf_pks[i,1]))]-self.r_pks[-1,0])>=0.36:
-				self.r_pks = np.append(self.r_pks,[[self.t[int(round(vf_pks[i,1]))],\
-											   vf_pks[i,0]]],axis=0)
-				j = i+1 #assign key value.  Index of the last detected r_peak
-				self.tsn_i,self.tsn_f = self._UpdateThresholds(self.v_int[vi_pts[i]],\
-												   self.r_pks[-1,1],self.tsn_i,self.tsn_f,signal=True)
-			
-			#peaks above thresholds, time between is greater than 0.2s but less than 0.36s
-			elif self.v_int[vi_pts[i]] > self.tsn_i.t and vf_pks[i,0] > self.tsn_f.t and \
-										(self.t[vf_pks[i,1]]-self.r_pks[-1,0])>0.2:
-				#if the maximum associated slope is greater than half the previous 
-				#detected R wave
-				if m_pos[i+1,0] > 0.5*m_pos[j,0]: #it is a R peak
-					self.r_pks = np.append(self.r_pks,[self.t[int(round(vf_pks[i,1]))],\
-											   vf_pks[i,0]],axis=0)
-					j = i+1
-					self.tsn_i,self.tsn_f = self._UpdateThresholds(self.v_int[vi_pts[i]],\
-													self.r_pks[-1,0],self.tsn_i,self.tsn_f,signal=True)
-				else: #it is a peak
-					self.tsn_i,self.tsn_f = self._UpdateThresholds(self.v_int[vi_pts[i]],\
-													self.v[vi_pts[i]],self.tsn_i,self.tsn_f,signal=False)
-			
-			else: #if not above the thresholds it is a noise peak
-				self.tsn_i,self.tsn_f = self._UpdateThresholds(self.v_int[vi_pts[i]],\
-												   self.v[vi_pts[i]],self.tsn_i,self.tsn_f,signal=False)
-
-			##########################################################################
-			#     Missing check for missing r-peaks by looking at peaks between      #
-			#     consecutive R-peaks that the time between is greater than          #
-			#     166% of the limited average: avg(rr8_lim)  	                       #
-			##########################################################################
-			
-			if len(self.r_pks[:,0])>2: #if there have been 2 R-peaks detected
-				self.rr8,rr8_lim = self._UpdateAvgRR(self.r_pks[-1,0]-self.r_pks[-2,0],\
-										 self.rr8,rr8_lim)
-			
-		self.r_pks = self.r_pks[1:,:] #trim off first initialized entry
-		self.q_trs = np.zeros_like(self.r_pks) #initialize Q-troughs array
-		for i in range(len(self.r_pks[:,0])):
-			i_rpk = np.where(self.t==self.r_pks[i,0])[0][0] #index of R-peak
-			#look in preceeding 0.1s of R-peak for the minimum
-			self.q_trs[i] = [self.t[np.argmin(self.v[i_rpk-int(round(0.1*self.fs)):i_rpk])\
-							  +i_rpk-int(round(0.1*self.fs))],\
-								min(self.v[i_rpk-int(round(0.1*self.fs)):i_rpk])]
-		
-		if debug==True:
-			f,ax = pl.subplots(2,figsize=(9,5),sharex=True)
-			ax[0].plot(self.t,self.v,label='filtered')
-			ax[0].plot(self.r_pks[:,0],self.r_pks[:,1],'r+')
-			ax[0].plot(self.q_trs[:,0],self.q_trs[:,1],'k+')
-			ax[0].legend(loc='best')
-			
-			ax[1].plot(self.t,self.v_int,label='integrated')
-			try:
-				ax[1].plot(self.t[vi_hpt],self.v_int[vi_hpt],'ko')
-			except:
-				ax[1].plot(self.t[vi_hpt[:-1]],self.v_int[vi_hpt[:-1]],'ko')
-			ax[1].plot(self.t[vi_pts],self.v_int[vi_pts],'ro')
-			ax[1].legend(loc='best')
-			ax[1].set_xlabel('Time [s]')
-			
-			ax[0].set_title('Find R-Peaks')
-			
-			f.tight_layout()
-			f.subplots_adjust(hspace=0)
+		return tsn_ma,tsn_f
 	
 	def RespRateExtraction(self):
 		"""
