@@ -67,7 +67,9 @@ class ECGAnalysis(object):
 		self.ElimSubCardiacFreq()
 		self.DerivativeFilter()
 		self.MovingAverageFilter()
-		self.DetectRPeaks(debug=True)
+		self.DetectRPeaks(debug=False)
+		self.RespRateExtraction()
+		self.CountOriginal(debug=True)
 		
 	def ElimLowFreq(self,cutoff=3,N=1,debug=False):
 		"""
@@ -498,9 +500,10 @@ class ECGAnalysis(object):
 					self._UpdateThresholds(self.v_ma[key][va_pts[i]],vf_pks[i,0],\
 													 snta,sntf,signal=False)
 			
-			self.r_pks[key] = np.zeros((len(np.argwhere(r_pk_b)),2)) #allocate R-peak array
-			self.r_pks[key][:,0] = self.t[key][vf_pks[r_pk_b,1].astype(int)] #set timings
-			self.r_pks[key][:,1] = vf_pks[r_pk_b,0] #set peak values
+			indices = np.unique(vf_pks[r_pk_b,1].astype(int))
+			self.r_pks[key] = np.zeros((len(indices),2)) #allocate R-peak array
+			self.r_pks[key][:,0] = self.t[key][indices] #set timings
+			self.r_pks[key][:,1] = self.v[key][indices] #set peak values
 			
 			self.q_trs[key] = np.zeros_like(self.r_pks[key]) #allocate Q-trough array
 			
@@ -644,150 +647,150 @@ class ECGAnalysis(object):
 		
 		return tsn_ma,tsn_f
 	
-	def RespRateExtraction(self):
-		"""
-		Compute parameters for respiratory rate estimation.
-		
-		Parameters
-		---------
-		r_pks : ndarray
-			N-by-2 array of [R-peak voltage, R-peak timestamp]
-		q_trs : ndarray
-			N-by-2 array of [Q-trough voltage, Q-trough timestamp]
-		
-		Class Returns
-		-------
-		bw : ndarray
-			N by 2 array of timestamps and voltages.  Mean of associated troughs and peaks
-		am : ndarray
-			N by 2 array timestamps and voltages.  
-			Difference between associated troughs and peaks
-		fm : ndarray
-			N-1 by 2 array of timestamps and voltages.  
-			Difference in time between consecutive R-peaks
-		"""
-		self.bw = np.copy(self.r_pks)
-		#X_b1 from Charlton paper
-		self.bw[:,1] = np.mean([self.r_pks[:,1],self.q_trs[:,1]],axis=0) 
-		
-		self.am = np.copy(self.r_pks)
-		self.am[:,1] = self.r_pks[:,1]-self.q_trs[:,1] #X_b2
-		
-		self.fm = np.zeros((len(self.r_pks[:,0])-1,2))
-		self.fm[:,1] = self.r_pks[1:,0]-self.r_pks[:-1,0] #X_b3
-		self.fm[:,0] = (self.r_pks[1:,0]+self.r_pks[:-1,0])/2
-	
 	@staticmethod
-	def SplineInterpolate(data,debug=False):
+	def _SplineCreation(data,dt = 0.2):
 		"""
-		Spline Interpolation of data
+		Create spline data 
 		
 		Parameters
-		---------
-		data : ndarray
-			N-1 by 2 array of timestamps and data
+		----------
+		data : array
+			N by 2 array of time and parameters
+		dt : float, optional
+			Timestep in seconds for spline data points.  Defaults to 0.2s
 		
 		Returns
 		-------
-		spl : ndarray
-			N by 2 array of x and y values of spline
+		spl : array
+			M by 2 array of time and parameters, with timestep = dt
 		"""
-		cs = interpolate.CubicSpline(data[:,0],data[:,1]) #setup spline function
-		xs = np.arange(data[0,0],data[-1,0],0.2) #setup x values.  0.2s intervals
 		
+		cs1 = interpolate.CubicSpline(data[:,0],data[:,1]) #setup spline function
+		cs2 = interpolate.CubicSpline(data[:,0],data[:,2]) #setup 2nd spline function
+		cs3 = interpolate.CubicSpline(data[:,0],data[:,3]) #setup 3rd spline function
+		
+		x = np.arange(data[0,0],data[-1,0],dt) #setup x values.  dt second intervals
 		#if x-values don't include end time, add it to the array
-		if xs[-1] != data[-1,0]:
-			xs = np.append(xs,data[-1,0])
+		if data[-1,0] not in x:
+			x = np.append(x,data[-1,0])
 			
-		spl = np.zeros((len(xs),2))
-		spl[:,1] = cs(xs)
-		spl[:,0] = xs
-			
-		if debug==True:
-			pl.figure()
-			pl.plot(data[:,0],data[:,1],'o',label='fm values')
-			pl.plot(xs,cs(xs),label='spline')
-			pl.legend()
-			pl.title('Spline Interpolation')
+		spl = np.zeros((len(x),4))
+		spl[:,0] = x
+		spl[:,1] = cs1(x)
+		spl[:,2] = cs2(x)
+		spl[:,3] = cs3(x)
 		
 		return spl
 	
-	@staticmethod
-	def CountOriginal(data,debug=False):
+	def RespRateExtraction(self):
+		"""
+		Compute parameters for respiratory rate estimation.  Compute spline for parameters
+		"""		
+		self.rr_p = dict() #dictionary for all 3 respiratory rate parameters
+		# time, FM, AM, BW
+		
+		self.rr_spl = dict() #dictionary for all 3 respiratory rate parameter splines
+		# spline time, FM spline, AM spline, BW spline
+		
+		for key in self.vd:
+			#allocate array.  FM is cut 1 short due to difference
+			#so exclude first of other parameters as well
+			self.rr_p[key] = np.zeros((len(self.r_pks[key])-1,4))
+			self.rr_p[key][:,0] = self.r_pks[key][1:,0] #set timings
+			#timings assumed to be at the R-peak (second R-peak for difference)
+			
+			#FM: Charleton X_b3 - dt between successive R-peaks
+			self.rr_p[key][:,1] = self.r_pks[key][1:,0]-self.r_pks[key][:-1,0]
+			
+			#AM: Charleton X_b2 - amplitude difference between Q-trough and R-peak
+			self.rr_p[key][:,2] = self.r_pks[key][1:,1]-self.q_trs[key][1:,1]
+			
+			#BW: Charleton X_b1 - mean of R-peak and Q-trough values
+			self.rr_p[key][:,3] = np.mean([self.r_pks[key][1:,1],self.q_trs[key][1:,1]],axis=0) 
+			
+			#create spline data points
+			self.rr_spl[key] = self._SplineCreation(self.rr_p[key],dt=0.2)
+	
+	def CountOriginal(self,debug=False):
 		"""
 		Implementation of Original Count Method from 
 		Axel Schafer, Karl Kratky.  "Estimation of Breathing Rate from Respiratory
 		Sinus Arrhythmia: Comparison of Various Methods."  Ann. of Biomed. Engr.
 		Vol 36 No 3, 2008.
-		
-		Parameters
-		----------
-		data : ndarray
-			N by 2 array of timestamps and data
-			
-		Returns
-		------
-		rr : ndarray
-			N by 2 array of respiration timings and frequencies (beats per second)
 		"""
-		#step 1 - bandpass filter with pass region between 0.1-0.5Hz
-		fs = 1/(data[1,0]-data[0,0]) #spline data frequency
-		wl = 0.1/(0.5*fs) #low cutoff frequency as % of nyquist frequency
-		wh = 0.5/(0.5*fs) #high cutoff freq as % of nyquist freq
-		
-		b,a = signal.butter(5,[wl,wh],'bandpass') #filtfilt, -> order is 2x given
-		
-		data[:,1] -= np.mean(data[:,1]) #remove mean from data
-		df = signal.filtfilt(b,a,data[:,1]) #apply filter to input data
-		
-		#step 2 - find local minima and maxima of filtered data
-		# get 3rd quartile, threshold is Q3*0.2
-		minpt = signal.argrelmin(df)[0]
-		maxpt = signal.argrelmax(df)[0]
-		
-		q3 = np.percentile(df[maxpt],75) #3rd quartile (75th percentile)
-		thr = 0.2*q3 #threshold
-		
-		#step 3 - valid breath cycle is max>thr, min<0,max>thr with no max/min in between
-		#local extrema sorted by index
-		#local max T/F.  True=>maximum, False=>minimum
-		ext,etp = zip(*sorted(zip(np.append(maxpt,minpt),\
-										[True]*len(maxpt)+[False]*len(minpt))))
-		ext,etp = np.array(ext),np.array(etp)
-		
-		brth_cyc = [] #initialize breath cycle array
-		rr = np.zeros((1,2)) #initialize respiratory rate array
-		
-		for i in range(len(ext)-2):
-			if etp[i]==True and etp[i+2]==True and etp[i+1]==False:
-				if df[ext[i]]>thr and df[ext[i+2]]>thr and df[ext[i+1]]<0:
-					brth_cyc.append([ext[i],ext[i+2]])
-					rr = np.append(rr,[[data[ext[i+1],0],1/(data[ext[i+2],0]\
-						 -data[ext[i],0])]],axis=0)
-		rr = rr[1:,:]			
-		
-		if debug==True:
-			f,ax = pl.subplots(2,figsize=(9,5),sharex=True)
-			ax[0].plot(data[:,0],data[:,1],'k--',alpha=0.5,label='initial')
-			ax[0].plot(data[:,0],df,'b',label='filtered')
-			ax[0].plot(data[minpt,0],df[minpt],'*')
-			ax[0].plot(data[maxpt,0],df[maxpt],'o')
-			ax[0].axhline(thr)
-			for st,sp in brth_cyc:
-				ax[0].plot(data[st:sp,0],df[st:sp],'r',linewidth=2,alpha=0.5)
-			ax[1].plot(rr[:,0],rr[:,1]*60,'+')
-			ax[0].legend()
+		self.rr = dict()
+		for key in self.vd:
+			self.rr[key] = dict() #another dictionary to store obtained RR times since 
+			#they will be different lengths for different parameters
 			
-			ax[1].set_xlabel('Time [s]')
-			ax[1].set_ylabel('Resp. Rate [BPM]')
-			ax[0].set_ylabel('R-R peak times [s]')
+			rr_splf = np.zeros((len(self.rr_spl[key][:,1]),3)) # spline filtered allocation
+			#step 1 - bandpass filter with pass region between 0.1-0.5Hz
+			fs = 1/(self.rr_spl[key][1,0]-self.rr_spl[key][0,0]) #spline data frequency
+			wl = 0.1/(0.5*fs) #low cutoff frequency as % of nyquist frequency
+			wh = 0.5/(0.5*fs) #high cutoff freq as % of nyquist freq
 			
-			ax[0].set_title('Count Original')
+			b,a = signal.butter(5,[wl,wh],'bandpass') #filtfilt, -> order is 2x given
 			
-			f.tight_layout()
-			f.subplots_adjust(hspace=0)
-		
-		return rr
+			#remove mean from data and filter
+			mn = np.mean(self.rr_spl[key][:,1:],axis=0)
+			rr_splf[:,0] = signal.filtfilt(b,a,self.rr_spl[key][:,1]-mn[0])
+			rr_splf[:,1] = signal.filtfilt(b,a,self.rr_spl[key][:,2]-mn[1])
+			rr_splf[:,2] = signal.filtfilt(b,a,self.rr_spl[key][:,3]-mn[2])
+			
+			if debug==True:
+				f,ax = pl.subplots(3,figsize=(16,5),sharex=True)
+				ax[0].plot(self.rr_spl[key][:,0],self.rr_spl[key][:,1],'k--',alpha=0.5,label='initial')
+				ax[1].plot(self.rr_spl[key][:,0],self.rr_spl[key][:,2],'k--',alpha=0.5,label='initial')
+				ax[2].plot(self.rr_spl[key][:,0],self.rr_spl[key][:,3],'k--',alpha=0.5,label='initial')
+				
+				ax[0].plot(self.rr_spl[key][:,0],rr_splf[:,0],'b',label='filtered')
+				ax[1].plot(self.rr_spl[key][:,0],rr_splf[:,1],'b',label='filtered')
+				ax[2].plot(self.rr_spl[key][:,0],rr_splf[:,2],'b',label='filtered')
+				
+			for i,param in zip(range(3),['fm','am','bw']):
+				#step 2 - find local minima and maxima of filtered data
+				# get 3rd quartile, threshold is Q3*0.2
+				minpt = signal.argrelmin(rr_splf[:,i])[0]
+				maxpt = signal.argrelmax(rr_splf[:,i])[0]
+					
+				q3 = np.percentile(rr_splf[maxpt,i],75) #3rd quartile (75th percentile)
+				thr = 0.2*q3 #threshold
+				
+				#step 3 - valid breath cycle is max>thr, min<0, max>thr with no max/min in between
+				#local extrema sorted by index
+				#local max T/F.  True=>maximum, False=>minimum
+				ext,etp = zip(*sorted(zip(np.append(maxpt,minpt),\
+												[True]*len(maxpt)+[False]*len(minpt))))
+				ext,etp = np.array(ext),np.array(etp)
+				
+				brth_cyc = [] #initialize breath cycle array
+				rr = [] #initialize respiratory rate array
+				
+				for j in range(len(ext)-2):
+					#if goes from local max to local min to local max
+					if etp[j]==True and etp[j+2]==True and etp[j+1]==False:
+						#if the maximums are above the threshold and minimum below 0
+						if rr_splf[ext[j],i]>thr and rr_splf[ext[j+2],i]>thr and rr_splf[ext[j+1],i]<0:
+							brth_cyc.append([ext[j],ext[j+2]])
+							#append time and breathing frequency
+							rr.append([self.rr_spl[key][ext[j+1],0],1/(self.rr_spl[key][ext[j+2],0]\
+								 -self.rr_spl[key][ext[j],0])])
+				self.rr[key][param] = np.array(rr)		
+				
+				if debug == True:
+					ax[i].plot(self.rr_spl[key][minpt,0],rr_splf[minpt,i],'*')
+					ax[i].plot(self.rr_spl[key][maxpt,0],rr_splf[maxpt,i],'o')
+					ax[i].axhline(thr)
+					for st,sp in brth_cyc:
+						ax[i].plot(self.rr_spl[key][st:sp,0],rr_splf[st:sp,i],'r',linewidth=2,alpha=0.5)
+					
+					ax[i].legend(title=f'Paramter: {param}')
+					ax[i].set_ylabel('R-R peak times [s]')
+				
+			if debug==True:	
+				f.tight_layout()
+				f.subplots_adjust(hspace=0)
+				ax[0].set_xlabel('Time [s]')
 	
 	@staticmethod
 	def CountAdv(data,debug=False):
