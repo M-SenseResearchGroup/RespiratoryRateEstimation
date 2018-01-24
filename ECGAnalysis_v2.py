@@ -59,7 +59,7 @@ class ECGAnalysis(object):
 		
 		self.nyq = 0.5*self.fs #Nyquist frequency is half sampling frequency
 	
-	def TestFunctions(self):
+	def TestFunctions(self,count = 'adv'):
 		self.ElimLowFreq()
 		self.ElimVeryHighFreq()
 		self.ElimMainsFreq()
@@ -69,7 +69,10 @@ class ECGAnalysis(object):
 		self.MovingAverageFilter()
 		self.DetectRPeaks(debug=False)
 		self.RespRateExtraction()
-		self.CountOriginal(debug=True)
+		if count == 'orig':
+			self.CountOriginal(debug=True)
+		if count == 'adv':
+			self.CountAdv(debug=True)
 		
 	def ElimLowFreq(self,cutoff=3,N=1,debug=False):
 		"""
@@ -292,10 +295,8 @@ class ECGAnalysis(object):
 									 +self.v[key][4:])/(8*self.dt)
 			self.t_der[key] = self.t[key][:-2]*1
 			self.t_der[key][:2] = 0 #timsteps are cut by 2 on either end
-#			self.t_der[key][-2:] = 0
 			
 			self.v_der[key] = np.insert(self.v_der[key],0,[0]*2)
-#			self.v_der[key] = np.append(self.v_der[key],[0]*2)
 		
 		if debug==True:
 			f,ax = pl.subplots(2,figsize=(9,5),sharex=True)
@@ -334,7 +335,6 @@ class ECGAnalysis(object):
 			#add zeros back in to shortened arrays
 			#adding n-1(moving average) + 2 (derivative) = n+1
 			self.v_ma[key] = np.insert(self.v_ma[key],0,[0]*(self.mfl_n+1))
-#			self.v_int[key] = np.append(self.v_int[key],[0]*2)
 			self.t_ma[key] = np.insert(self.t_ma[key],0,[0]*(self.mfl_n-1))
 		
 		if debug==True:
@@ -792,108 +792,98 @@ class ECGAnalysis(object):
 				f.subplots_adjust(hspace=0)
 				ax[0].set_xlabel('Time [s]')
 	
-	@staticmethod
-	def CountAdv(data,debug=False):
+	def CountAdv(self,debug=False):
 		"""
 		Implementation of Advanced Count Method from 
 		Axel Schafer, Karl Kratky.  "Estimation of Breathing Rate from Respiratory
 		Sinus Arrhythmia: Comparison of Various Methods."  Ann. of Biomed. Engr.
 		Vol 36 No 3, 2008.
-		
-		Parameters
-		----------
-		data : ndarray
-			N by 2 array of timesteps and data.  Originally used for R-R interval timings.
-			
-		Returns
-		------
-		rr : ndarray
-			N by 2 array of respiration timesteps and frequencies (beats per second)
 		"""
+		self.rr = dict() #allocate array for respiratory rate estimates
+		for key in self.vd:
+			self.rr[key] = dict() #another dictionary since lengths of arrays
+			#for different parameters will possibly be different sizes
+			
+			#step 1 - bandpass filter with pass region between 0.1-0.5Hz
+			fs = 1/(self.rr_spl[key][1,0]-self.rr_spl[key][0,0]) #spline data frequency
+			wl = 0.1/(0.5*fs) #low cutoff frequency as % of nyquist frequency
+			wh = 0.5/(0.5*fs) #high cutoff freq as % of nyquist freq
+			
+			b,a = signal.butter(5,[wl,wh],'bandpass') #filtfilt, -> order is 2x given
 		
-		#step 1 - bandpass filter with pass region between 0.1-0.5Hz
-		fs = 1/(data[1,0]-data[0,0]) #spline data frequency
-		wl = 0.1/(0.5*fs) #low cutoff frequency as % of nyquist frequency
-		wh = 0.5/(0.5*fs) #high cutoff freq as % of nyquist freq
-		
-		b,a = signal.butter(5,[wl,wh],'bandpass') #filtfilt, -> order is 2x given
-		
-		data[:,1] -= np.mean(data[:,1]) #remove mean from data
-		df = signal.filtfilt(b,a,data[:,1]) #apply filter to input data
-		
-		#step 2 - find local minima and maxima of filtered data
-		# get 3rd quartile, threshold is Q3*0.2
-		minpt = signal.argrelmin(df)[0]
-		maxpt = signal.argrelmax(df)[0]
-		
-		#step 3 - calculate absolute value diff. between subsequent local extrema
-		# 3rd quartile of differences, threshold = 0.1*Q3
-		ext,etp = zip(*sorted(zip(np.append(maxpt,minpt),\
-							[True]*len(maxpt)+[False]*len(minpt))))
-		ext,etp = np.array(ext),np.array(etp)
-		
-		ext_diff = np.zeros(len(ext)-1)
-		for i in range(len(ext)-1):
-			if etp[i] != etp[i+1]: #ie min followed by max or max followed by min
-				ext_diff[i] = abs(df[ext[i]]-df[ext[i+1]])
+			rr_splf = np.zeros_like(self.rr_spl[key][:,1:])
+			mn = np.mean(self.rr_spl[key][:,1:],axis=0)
+
+			#remove mean and apply filter to input spline data
+			rr_splf[:,0] = signal.filtfilt(b,a,self.rr_spl[key][:,1]-mn[0])
+			rr_splf[:,1] = signal.filtfilt(b,a,self.rr_spl[key][:,2]-mn[1]) 
+			rr_splf[:,2] = signal.filtfilt(b,a,self.rr_spl[key][:,3]-mn[2]) 
+			
+			if debug == True:
+				f,ax = pl.subplots(3,figsize=(16,9),sharex=True)
 				
-		thr = 0.1*np.percentile(ext_diff,75) #threshold value
-		
-		if debug==True:
-			f,ax = pl.subplots(2,figsize=(9,5),sharex=True)
-			ax[0].plot(data[:,0],df)
-			ax[0].plot(data[minpt,0],df[minpt],'k+')
-			ax[0].plot(data[maxpt,0],df[maxpt],'k+')
-		
-		rem = 0 #removed indices counter
-		#step 4 - remove any sets whose difference is less than the threshold
-		for i in range(len(ext)-1):
-			if etp[i-rem] != etp[i-rem+1] and abs(df[ext[i-rem]]-df[ext[i-rem+1]])<thr:
-				ext = np.delete(ext,[i-rem,i-rem+1])
-				etp = np.delete(etp,[i-rem,i-rem+1])
-				rem += 2
-		
-		#step 5 - breath cycles are now minimum -> maximum -> minimum = 1 cycle
-		brth_cyc = [] #initialize breath cycle array
-		#rr = np.zeros((1,2)) #initialize array for respiratory rate and timings
-		
-		#############################################################
-		#   	                 YES/NO?                              #
-		#############################################################
-		brth_cyc_xnx = [] #try maX-miN-maX cycles to see if more than min-max-min
-		
-		for i in range(len(ext)-2):
-			if etp[i]==False and etp[i+1]==True and etp[i+2]==False:
-				brth_cyc.append([ext[i],ext[i+2]])
-			elif etp[i]==True and etp[i+1]==False and etp[i+2]==True:
-				brth_cyc_xnx.append([ext[i],ext[i+2]])
+			for i,param in zip(range(3),['fm','am','bw']):
+				#step 2 - find local minima and maxima of filtered data
+				# get 3rd quartile, threshold is Q3*0.2
+				minpt = signal.argrelmin(rr_splf[:,i])[0]
+				maxpt = signal.argrelmax(rr_splf[:,i])[0]
 				
-		rr = np.zeros((max([len(brth_cyc),len(brth_cyc_xnx)]),2))
-		
-		if len(brth_cyc)<len(brth_cyc_xnx):
-			brth_cyc = brth_cyc_xnx
-			
-		for i in range(len(rr[:,0])):
-			rr[i] = [(data[brth_cyc[i][1],0]+data[brth_cyc[i][0],0])/2\
-				 ,1/(data[brth_cyc[i][1],0]-data[brth_cyc[i][0],0])]
-		
-		if debug==True:
-			ax[0].plot(data[ext,0],df[ext],'ro',alpha=0.5,markersize=0.5)
-			
-			for st,sp in brth_cyc:
-				ax[0].plot(data[st:sp,0],df[st:sp],'r',alpha=0.25,linewidth=5)
-			
-			ax[1].plot(rr[:,0],rr[:,1]*60,'+',markersize=10)
-			ax[1].set_ylabel('Breath Frequency [BPM]')
-			ax[0].set_ylabel('R-R peak time [s]')
-			ax[1].set_xlabel('Time [s]')
-			
-			ax[0].set_title('Advanced Count')
-			
+				#step 3 - calculate absolute value diff. between subsequent local extrema
+				# 3rd quartile of differences, threshold = 0.1*Q3
+				ext,etp = zip(*sorted(zip(np.append(maxpt,minpt),\
+									[True]*len(maxpt)+[False]*len(minpt))))
+				ext,etp = np.array(ext),np.array(etp)
+				
+				ext_diff = np.zeros(len(ext)-1)
+				for j in range(len(ext)-1):
+					if etp[j] != etp[j+1]: #ie min followed by max or max followed by min
+						ext_diff[j] = abs(rr_splf[ext[j],i]-rr_splf[ext[j+1],i])
+						
+				thr = 0.1*np.percentile(ext_diff,75) #threshold value
+				
+				if debug==True:
+					ax[i].plot(self.rr_spl[key][:,0],rr_splf[:,i])
+					ax[i].plot(self.rr_spl[key][minpt,0],rr_splf[minpt,i],'k+')
+					ax[i].plot(self.rr_spl[key][maxpt,0],rr_splf[maxpt,i],'k+')
+				
+				rem = 0 #removed indices counter
+				#step 4 - remove any sets whose difference is less than the threshold
+				for j in range(len(ext)-1):
+					if etp[j-rem] != etp[j-rem+1]:
+						if abs(rr_splf[ext[j-rem],i]-rr_splf[ext[j-rem+1],i])<thr:
+							ext = np.delete(ext,[j-rem,j-rem+1])
+							etp = np.delete(etp,[j-rem,j-rem+1])
+							rem += 2
+				
+				#step 5 - breath cycles are now minimum -> maximum -> minimum = 1 cycle
+				brth_cyc = [] #initialize breath cycle array
+				brth_cyc_xnx = [] #try maX-miN-maX cycles to see if more than min-max-min
+				
+				for j in range(len(ext)-2):
+					if etp[j]==False and etp[j+1]==True and etp[j+2]==False:
+						brth_cyc.append([ext[j],ext[j+2]])
+					elif etp[j]==True and etp[j+1]==False and etp[j+2]==True:
+						brth_cyc_xnx.append([ext[j],ext[j+2]])
+						
+				self.rr[key][param] = np.zeros((max([len(brth_cyc),len(brth_cyc_xnx)]),2))
+				
+				if len(brth_cyc)<len(brth_cyc_xnx):
+					brth_cyc = brth_cyc_xnx
+					
+				for j in range(len(self.rr[key][param][:,0])):
+					self.rr[key][param][j] = [(self.rr_spl[key][brth_cyc[j][1],0]+\
+													 self.rr_spl[key][brth_cyc[j][0],0])/2\
+													 ,1/(self.rr_spl[key][brth_cyc[j][1],0]-\
+													  self.rr_spl[key][brth_cyc[j][0],0])]
+				
+				if debug==True:
+					ax[i].plot(self.rr_spl[key][ext,0],rr_splf[ext,i],'ro',alpha=0.5,markersize=0.5)
+					
+					for st,sp in brth_cyc:
+						ax[i].plot(self.rr_spl[key][st:sp,0],rr_splf[st:sp,i],'r',alpha=0.25,linewidth=5)
+		if debug == True:
 			f.tight_layout()
 			f.subplots_adjust(hspace=0)
-		
-		return rr
 	
 	@staticmethod
 	def SmartModFusion(bw,am,fm,use_given_time=True,plot=True):
