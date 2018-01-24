@@ -59,7 +59,7 @@ class ECGAnalysis(object):
 		
 		self.nyq = 0.5*self.fs #Nyquist frequency is half sampling frequency
 	
-	def TestFunctions(self,count = 'adv'):
+	def TestFunctions(self,count = 'adv',fuse=True):
 		self.ElimLowFreq()
 		self.ElimVeryHighFreq()
 		self.ElimMainsFreq()
@@ -70,9 +70,11 @@ class ECGAnalysis(object):
 		self.DetectRPeaks(debug=False)
 		self.RespRateExtraction()
 		if count == 'orig':
-			self.CountOriginal(debug=True)
+			self.CountOriginal(debug=False)
 		if count == 'adv':
-			self.CountAdv(debug=True)
+			self.CountAdv(debug=False)
+		if fuse == True:
+			self.SmartModFusion(use_given_time=False)
 		
 	def ElimLowFreq(self,cutoff=3,N=1,debug=False):
 		"""
@@ -885,76 +887,67 @@ class ECGAnalysis(object):
 			f.tight_layout()
 			f.subplots_adjust(hspace=0)
 	
-	@staticmethod
-	def SmartModFusion(bw,am,fm,use_given_time=True,plot=True):
+	def SmartModFusion(self,use_given_time=True,plot=True):
 		"""
 		Modulation smart fusion of bandwidth, AM, and FM respiratory estimates.
 		From Karlen et al, 2013.  Respiratory rate is output of standard deviation of 
-		estimated rate between BW, AM, and FM estimated rates is less than 4 BPM
+		estimated rate between BW, AM, and FM estimated rates is less than 4 BPM.
 		
 		Parameters
 		---------
-		bw : ndarray
-			N by 2 array of respiratory rate estimations and timings via bandwidth parameter
-		am : ndarray
-			N by 2 array of respiratory rate estimations and timings via AM parameter
-		fm : ndarray
-			N by 2 array of respiratory rate estimations and timings via FM parameter
 		use_given_time : bool
-			Use timings from BW/AM/FM data, or based on 0.2s timings.  Defaults to True.
+			Use timings from parameter resp. rate estimates (True) or use 0.2s 
+			interpolation (False).  Defaults to True.
 		plot : bool
-			Plot resulting data.  Defaults to True.
-		
-		Returns
-		-------
-		rr_est : ndarray
-			N by 2 array of respiratory rate estimates and timings
+			Plot resulting fused respiratory rate estimates
 		"""
-		#convert to BPM
-		bw[:,1] *= 60
-		am[:,1] *= 60
-		fm[:,1] *= 60
-		
-		bwsf = interpolate.CubicSpline(bw[:,0],bw[:,1])
-		amsf = interpolate.CubicSpline(am[:,0],am[:,1])
-		fmsf = interpolate.CubicSpline(fm[:,0],fm[:,1])
-		
-		if use_given_time==True:
-			x = np.unique(np.append(np.append(bw[:,0],am[:,0]),fm[:,0]))
-		else:
-			tmin = max([bw[0,0],am[0,0],fm[0,0]])
-			tmax = min([bw[-1,0],am[-1,0],fm[-1,0]])
-			x = np.arange(tmin,tmax,0.2)
-		lqi = np.array([False]*len(x)) #Low Quality Index
-		
-		bws = bwsf(x)
-		ams = amsf(x)
-		fms = fmsf(x)
-		
-		st_dev = np.std(np.array([bws,ams,fms]),axis=0)
-		rr = np.mean(np.array([bws,ams,fms]),axis=0)
-		
-		for i in range(len(st_dev)):
-			if st_dev[i]>4:
-				lqi[i] = True #if Standard Dev > 4 BPM Low Quality Index
-		
-		rr_est = np.zeros((len(rr),2))
-		rr_est[:,1] = rr
-		rr_est[:,0] = x
-		
-		if plot==True:
-			f,ax = pl.subplots(figsize=(9,5))
-			ax.plot(rr_est[:,0],rr_est[:,1],label='Fused Est.')
-#			ax.plot(bw[:,0],bw[:,1],'--',alpha=0.5,label='BW Est.')
-#			ax.plot(am[:,0],am[:,1],'--',alpha=0.5,label='AM Est.')
-#			ax.plot(fm[:,0],fm[:,1],'--',alpha=0.5,label='FM Est.')
+		self.rr_fuse = dict() #allocate dictionary for fused resp. rate estimates
+		for key in self.vd:
+			#convert to BPM
+			for param in self.rr[key].keys():
+				self.rr[key][param][:,1] *= 60
 			
-			ax.fill_between(x,rr-st_dev,rr+st_dev,alpha=0.5)
+			#calculate spline functions
+			fmsf = interpolate.CubicSpline(self.rr[key]['fm'][:,0],self.rr[key]['fm'][:,1])
+			amsf = interpolate.CubicSpline(self.rr[key]['am'][:,0],self.rr[key]['am'][:,1])
+			bwsf = interpolate.CubicSpline(self.rr[key]['bw'][:,0],self.rr[key]['bw'][:,1])
+
+			if use_given_time==True:
+				x = np.unique(np.concatenate((self.rr[key]['fm'][:,0],self.rr[key]['am'][:,0],\
+								  self.rr[key]['bw'][:,0])))
+			else:
+				tmin = max([self.rr[key]['fm'][0,0],self.rr[key]['am'][0,0],self.rr[key]['bw'][0,0]])
+				tmax = min([self.rr[key]['fm'][-1,0],self.rr[key]['am'][-1,0],self.rr[key]['bw'][-1,0]])
+				x = np.arange(tmin,tmax,0.2)
+			lqi = np.array([False]*len(x)) #Low Quality Index
 			
-			ax.legend()
+			fms = fmsf(x)
+			ams = amsf(x)
+			bws = bwsf(x)
 			
-		
-		return rr_est,lqi
+			st_dev = np.std(np.array([bws,ams,fms]),axis=0)
+			rr = np.mean(np.array([bws,ams,fms]),axis=0)
+			
+			for i in range(len(st_dev)):
+				if st_dev[i]>4:
+					lqi[i] = True #if Standard Dev > 4 BPM Low Quality Index
+			
+			self.rr_fuse[key] = np.zeros((len(rr),2))
+			self.rr_fuse[key][:,1] = rr
+			self.rr_fuse[key][:,0] = x
+			
+			if plot==True:
+				f,ax = pl.subplots(figsize=(16,5))
+				ax.plot(self.rr_fuse[key][:,0],self.rr_fuse[key][:,1],label='Fused Est.')
+				
+				ind = np.argwhere(lqi[1:]!=lqi[:-1]).flatten() + 1
+				ind = np.append(ind,len(lqi))
+				ind = np.insert(ind,0,0)
+				for i1,i2 in zip(ind[:-1],ind[1:]+1):
+					ax.fill_between(x[i1:i2],rr[i1:i2]-st_dev[i1:i2],rr[i1:i2]+st_dev[i1:i2],\
+							  alpha=0.5,color='red' if lqi[i1] else 'blue')
+				ax.set_title(f'{key}')
+				ax.legend()
 
 #s = timer()
 
