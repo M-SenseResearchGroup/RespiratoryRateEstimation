@@ -17,7 +17,10 @@ class EcgData:
 	def __init__(self):
 		self.t = dict()
 		self.v = dict()
-		
+
+class OrderError(Exception):
+	pass
+	
 class TSN:
 	"""
 	Class for storing Threshold, Signal, Noise values for R-peak detection
@@ -67,7 +70,8 @@ class ECGAnalysis(object):
 		self.ElimSubCardiacFreq()
 		self.DerivativeFilter()
 		self.MovingAverageFilter()
-		self.DetectRPeaks(debug=False)
+		self.DetectRPeaks(debug=True)
+		self.PlotHeartRate()
 		self.RespRateExtraction()
 		if count == 'orig':
 			self.CountOriginal(debug=False)
@@ -352,6 +356,9 @@ class ECGAnalysis(object):
 		Detect R-peaks in the filtered ECG signal
 		"""
 		
+		# TODO something wrong in checking back or checking for r-peaks
+		# TODO minimum time is 0.12s -> HR that is way too high
+		
 		#numer of samples in delay time
 		ndly = int(round(self.delay/1000*self.fs))
 		#number of samples in 25,125,225ms
@@ -481,7 +488,8 @@ class ECGAnalysis(object):
 						self._UpdateThresholds(self.v_ma[key][va_pts[i]],vf_pks[i,0],\
 													 snta,sntf,signal=True)
 					#is the time difference between 0.2 and 0.36s?
-					elif (vf_pks[i+1,1]-vf_pks[j,1])*self.dt > 0.2:
+					#TODO i+1 here?
+					elif (vf_pks[i,1]-vf_pks[j,1])*self.dt > 0.2:
 						#is the slope greater than 50% of previous R-peak slope?
 						if m_pos[i,0] > 0.5*m_pos[j,0]:
 							r_pk_b[i] = True
@@ -491,7 +499,8 @@ class ECGAnalysis(object):
 													 snta,sntf,signal=True)
 							j = i
 					#check for duplicate points, don't want to double count
-					elif (vf_pks[i+1,1]-vf_pks[j,1])*self.dt == 0:
+					#TODO i+1 here?
+					elif (vf_pks[i,1]-vf_pks[j,1])*self.dt == 0:
 						pass
 					#if the peak is less than 0.2s away from last R-peak, it is noise
 					else:
@@ -683,6 +692,26 @@ class ECGAnalysis(object):
 		spl[:,3] = cs3(x)
 		
 		return spl
+	
+	def PlotHeartRate(self):
+		"""
+		Plot the results of R-peak detection by plotting Heart Rate (Hz) vs time
+		"""
+		if 'r_pks' not in self.__dict__.keys():
+			raise OrderError("Plotting Heart Rate must be done after detecting R-peaks.")
+		else:
+			f,ax = pl.subplots(figsize=(16,6))
+			
+			for i in self.vd:
+				ax.plot(self.r_pks[i][1:,0]-self.r_pks[i][0,0],\
+							60/(self.r_pks[i][1:,0]-self.r_pks[i][:-1,0]),label=f'{i}')
+			
+			ax.legend(title='Posture')
+			ax.set_ylabel('Heart Rate [BPM]')
+			ax.set_xlabel('Time [s]')
+			
+			f.tight_layout()
+		
 	
 	def RespRateExtraction(self):
 		"""
