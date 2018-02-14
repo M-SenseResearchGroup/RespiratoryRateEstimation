@@ -8,7 +8,9 @@ Python 3.6.3 on Windows 10 with 64-bit Anaconda
 """
 import numpy as np
 import matplotlib.pyplot as pl
+import matplotlib.patches as mpatches
 from scipy import signal, interpolate
+from os import listdir
 
 from timeit import default_timer as timer
 
@@ -397,7 +399,8 @@ class ECGAnalysis(object):
 										  <0.5*self.v_ma[key][va_pts[i]])[0][0] + va_pts[i]
 					longwave = False #half peak found => not a long QRS complex
 				except:
-					hpt[i] = m_pos[i,1] + ndly
+					hpt[i] = m_pos[i,1] + ndly if m_pos[i,1] + ndly < len(self.v_ma[key]) \
+														else len(self.v_ma[key])-1
 					longwave = True #half peak not found => long QRS complex
 				
 				#find maximum values in filtered data preceeding descending half-peak in 
@@ -419,7 +422,7 @@ class ECGAnalysis(object):
 			r_pk_b = np.full_like(hpt,False,dtype=bool) #store if peak is R-peak (T) or not (F)
 			#Determine the type of peak (R,T,etc) for learning phase (9 peaks->8 RR times)
 			k = 1 #loop counter
-			j = k #last detected R-peak counter
+			j = 0 #last detected R-peak counter
 			nrpk = 0 #keep count for first 8 R-peaks (threshold learning)
 			while nrpk < 9:
 				#Are the moving average and filtered peaks above the thresholds
@@ -538,6 +541,9 @@ class ECGAnalysis(object):
 				ax[1].plot(self.t_ma[key][hpt],self.v_ma[key][hpt],'ro')
 				ax[1].plot(self.t_ma[key][va_pts],self.v_ma[key][va_pts],'ko')
 				
+				ax[0].set_title(f'{key}')
+				ax[0].set_xlabel('Time [s]')
+				ax[0].set_ylabel('Voltage [mv]')
 				f.tight_layout()
 				f.subplots_adjust(hspace=0)					
 	
@@ -706,7 +712,7 @@ class ECGAnalysis(object):
 				ax.plot(self.r_pks[i][1:,0]-self.r_pks[i][0,0],\
 							60/(self.r_pks[i][1:,0]-self.r_pks[i][:-1,0]),label=f'{i}')
 			
-			ax.legend(title='Posture')
+			ax.legend(title='Activity')
 			ax.set_ylabel('Heart Rate [BPM]')
 			ax.set_xlabel('Time [s]')
 			
@@ -967,7 +973,7 @@ class ECGAnalysis(object):
 			
 			if plot==True:
 				f,ax = pl.subplots(figsize=(16,5))
-				ax.plot(self.rr_fuse[key][:,0],self.rr_fuse[key][:,1],label='Fused Est.')
+				line1, = ax.plot(self.rr_fuse[key][:,0],self.rr_fuse[key][:,1],label='Fused Est.')
 				
 				ind = np.argwhere(lqi[1:]!=lqi[:-1]).flatten() + 1
 				ind = np.append(ind,len(lqi))
@@ -976,21 +982,60 @@ class ECGAnalysis(object):
 					ax.fill_between(x[i1:i2],rr[i1:i2]-st_dev[i1:i2],rr[i1:i2]+st_dev[i1:i2],\
 							  alpha=0.5,color='red' if lqi[i1] else 'blue')
 				ax.set_title(f'{key}')
-				ax.legend()
+				
+				b_p = mpatches.Patch(color='blue',alpha=0.5,label='St. Dev. < 4 BPM')
+				r_p = mpatches.Patch(color='red',alpha=0.5,label='St. Dev. > 4 BPM')
+				ax.legend(handles=[b_p,r_p,line1])
 
 #s = timer()
 
 fprefix = 'C:\\Users\\Lukas Adamowicz'+\
 	  '\\Dropbox\\Masters\\Project\\RespiratoryRate_HeartRate\\Python RRest\\'
-data = EcgData()
-data.t['middle'],data.v['middle'] = np.genfromtxt(fprefix+'middle_ecg.csv',\
-				  skip_header=0,unpack=True,delimiter=',')
 
-data.t['back'],data.v['back'] = np.genfromtxt(fprefix+'back_ecg.csv',\
-				  skip_header=0,unpack=True,delimiter=',')
+fprefix_val = 'C:\\Users\\Lukas Adamowicz'+\
+	  '\\Dropbox\\Masters\\Project\\RespiratoryRate_HeartRate\\'+\
+	  'RespiratoryRateEstimation\\Validation_Data\\RespRate_PPG_Phone\\'
 
-data.t['forward'],data.v['forward'] = np.genfromtxt(fprefix+'forward_ecg.csv',\
-				  skip_header=0,unpack=True,delimiter=',')
+subj_ids = listdir(fprefix_val)
+	  
+data = dict()
+for s in subj_ids:
+	data[s] = EcgData()
+	annot = np.genfromtxt(fprefix_val+s+'\\annotations.csv',skip_header=1,delimiter=',',dtype=str)
+	
+	bb = float(annot[0,-3][1:-1])
+	be = float(annot[0,-2][1:-1])
+	ab = float(annot[1,-3][1:-1])
+	ae = float(annot[1,-2][1:-1])
+	
+	floc = fprefix_val + s + '\\ecg_lead_ii\\'
+	floc += listdir(floc)[0] + '\\'
+	floc += listdir(floc)[0] + '\\'
+	t,v = np.genfromtxt(floc+'elec.csv',skip_header=1,unpack=True,delimiter=',')
+	
+	
+	bib = np.argmin(abs(t-bb))
+	bie = np.argmin(abs(t-be))
+	aib = np.argmin(abs(t-ab))
+	aie = np.argmin(abs(t-ae))
+	
+	t -= t[0]
+	t /= 1000
+	
+	data[s].t['Before Exercise'] = t[bib:bie]
+	data[s].v['Before Exercise'] = v[bib:bie]
+	
+	data[s].t['After Exercise'] = t[aib:aie]
+	data[s].v['After Exercise'] = v[aib:aie]
+	
+#data.t['middle'],data.v['middle'] = np.genfromtxt(fprefix+'middle_ecg.csv',\
+#				  skip_header=0,unpack=True,delimiter=',')
+#
+#data.t['back'],data.v['back'] = np.genfromtxt(fprefix+'back_ecg.csv',\
+#				  skip_header=0,unpack=True,delimiter=',')
+#
+#data.t['forward'],data.v['forward'] = np.genfromtxt(fprefix+'forward_ecg.csv',\
+#				  skip_header=0,unpack=True,delimiter=',')
 
-test = ECGAnalysis(data)
+#test = ECGAnalysis(data['KJ'])
 #print(f'Import/Setup time: {timer()-s:.5f} s')
