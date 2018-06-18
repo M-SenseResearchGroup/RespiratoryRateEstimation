@@ -9,8 +9,8 @@ Python 3.6.5 on Windows 10 with 64-bit Anaconda
 
 import sys
 from os import getcwd
-from PyQt5.QtWidgets import QMainWindow, QApplication, QFileDialog, QAction, qApp, QMessageBox, QMenu, QGridLayout, \
-    QLabel, QLineEdit, QHBoxLayout, QVBoxLayout, QGroupBox, QDialog, QCheckBox
+from PyQt5.QtWidgets import QMainWindow, QApplication, QFileDialog, QAction, qApp, QMessageBox, QMenu, QToolTip, \
+    QLabel, QLineEdit, QHBoxLayout, QVBoxLayout, QGroupBox, QDialog, QCheckBox, QPushButton
 from PyQt5.QtGui import QIcon
 from ECGAnalysis_v2 import ECGAnalysis, EcgData
 from numpy import loadtxt, array, argmin
@@ -189,7 +189,6 @@ class FilterSettingsWindow(QDialog):
 
         # set defaults
         self.mov_len_def = 150  # moving average filter length (samples) default
-        self.delay_def = 175  # delay (ms) to wait before declaring half peak default
 
         self.elf_cut_def = 3.0  # Eliminate low frequency default cutoff (Hz)
         self.elf_N_def = 1  # Eliminate low frequency default filter order
@@ -205,75 +204,130 @@ class FilterSettingsWindow(QDialog):
         self.esc_cut_def = 0.5  # eliminate sub-cardiac frequency default cutoff (Hz)
         self.esc_N_def = 4  # eliminate sub-cardiac frequency default order
 
+        # set values
+        self.setDefaults()
+
         self.initUI()
 
     def initUI(self):
         self.setGeometry(300, 300, 250, 150)
         self.setWindowTitle('Filter Settings')
 
-        self.elfGroupBox = self.createFilterOptions('Eliminate Low Frequencies', self.elf_cut_def, self.elf_N_def)
-        self.evhfGroupBox = self.createFilterOptions('Eliminate Very High Frequencies', self.evhf_cut_def,
-                                                     self.evhf_N_def, self.evhf_det_def)
-        self.emfGroupBox = self.createFilterOptions('Eliminate Mains Frequencies', self.emf_cut_def, self.emf_Q_def,
-                                                    self. emf_det_def)
-        self.escGroupBox = self.createFilterOptions('Eliminate Sub-Cardiac Frequencies', self.esc_cut_def,
-                                                    self.esc_N_def)
+        elf_gb, self.elf_w = self.createFilterOptions('Eliminate Low Frequencies', 'elf_cut', 'elf_N')
+        evhf_gb, self.evhf_w = self.createFilterOptions('Eliminate Very High Frequencies', 'evhf_cut', 'evhf_N',
+                                                        'evhf_det')
+        emf_gb, self.emf_w = self.createFilterOptions('Eliminate Mains Frequencies', 'emf_cut', 'emf_Q', 'emf_det')
+        esc_gb, self.esc_w = self.createFilterOptions('Eliminate Sub-Cardiac Frequencies', 'esc_cut', 'esc_N')
 
-        self.mafGroupBox = QGroupBox('Moving Average Filter')
+        maf_gb = QGroupBox('Moving Average Filter')
         mafLayout = QHBoxLayout()
-        mafLabel = QLabel('Length: ', self)
         mafTxt = QLineEdit(self)
-        mafTxt.setText(str(self.mov_len_def))
+        mafTxt.setText(str(self.mov_len))
+        mafTxt.textEdited.connect(lambda text: self.changeIntVals(text, 'mov_len'))
 
-        mafLayout.addWidget(mafLabel)
+        mafLayout.addWidget(QLabel('Length: ', self))
         mafLayout.addWidget(mafTxt)
-        self.mafGroupBox.setLayout(mafLayout)
+        maf_gb.setLayout(mafLayout)
+
+        resetDefaults = QPushButton('Reset Defaults', self)
+        resetDefaults.clicked.connect(lambda: self.setDefaults(clicked=True))
 
         windowLayout = QVBoxLayout()
-        windowLayout.addWidget(self.elfGroupBox)
-        windowLayout.addWidget(self.evhfGroupBox)
-        windowLayout.addWidget(self.emfGroupBox)
-        windowLayout.addWidget(self.escGroupBox)
-        windowLayout.addWidget(self.mafGroupBox)
+        windowLayout.addWidget(elf_gb)
+        windowLayout.addWidget(evhf_gb)
+        windowLayout.addWidget(emf_gb)
+        windowLayout.addWidget(esc_gb)
+        windowLayout.addWidget(maf_gb)
+        windowLayout.addWidget(resetDefaults)
         self.setLayout(windowLayout)
 
-    def createFilterOptions(self, title, cut_def, N_def, det_def=None):
+    def setDefaults(self, clicked=False):
+        if clicked == False:
+            self.mov_len = self.mov_len_def
+            self.elf_cut = self.elf_cut_def
+            self.elf_N = self.elf_N_def
+            self.evhf_cut = self.evhf_cut_def
+            self.evhf_N = self.evhf_N_def
+            self.evhf_det = self.evhf_det_def
+            self.emf_cut = self.emf_cut_def
+            self.emf_Q = self.emf_Q_def
+            self.emf_det = self.emf_det_def
+            self.esc_cut = self.esc_cut_def
+            self.esc_N = self.esc_N_def
+        else:
+            self.elf_w[0].setText(str(self.elf_cut_def))
+            self.elf_w[1].setText(str(self.elf_N_def))
+            self.evhf_w[0].setText(str(self.evhf_cut_def))
+            self.evhf_w[1].setText(str(self.evhf_N_def))
+            self.evhf_w[2].setChecked(self.evhf_det_def)
+            self.emf_w[0].setText(str(self.emf_cut_def))
+            self.emf_w[1].setText(str(self.emf_Q_def))
+            self.emf_w[2].setChecked(self.emf_det_def)
+            self.esc_w[0].setText(str(self.esc_cut_def))
+            self.esc_w[1].setText(str(self.esc_N_def))
+
+
+    def createFilterOptions(self, title, cut_name, N_name, det_name=None):
         vGroupBox = QGroupBox(title)
         layout = QVBoxLayout()
+
+        input_widgets = []
 
         line1 = QHBoxLayout()
         label1 = QLabel('Cutoff (Hz):', self)
         txtbox1 = QLineEdit(self)
-        txtbox1.setText(str(cut_def))
+        txtbox1.setText(str(self.__dict__[cut_name]))
+        txtbox1.textChanged.connect(lambda text: self.changeFloatVals(text, cut_name))
         line1.addWidget(label1)
         line1.addWidget(txtbox1)
 
+        input_widgets.append(txtbox1)
         layout.addLayout(line1)
 
         line2 = QHBoxLayout()
-        label2 = QLabel('Order (Hz):', self)
+        label2 = QLabel('Order:', self)
         txtbox2 = QLineEdit(self)
-        txtbox2.setText(str(N_def))
+        txtbox2.setText(str(self.__dict__[N_name]))
+        txtbox2.textChanged.connect(lambda text: self.changeIntVals(text, N_name))
         line2.addWidget(label2)
         line2.addWidget(txtbox2)
 
+        input_widgets.append(txtbox2)
         layout.addLayout(line2)
 
-        if not isinstance(det_def, type(None)):
+        if not isinstance(det_name, type(None)):
             line3 = QHBoxLayout()
             label3 = QLabel('Detrend?', self)
             chbox = QCheckBox(self)
-            chbox.setChecked(det_def)
+            chbox.setChecked(self.__dict__[det_name])
+            chbox.stateChanged.connect(lambda chboxval: self.changeCBoxVals(chboxval, det_name))
             line3.addWidget(label3)
             line3.addWidget(chbox)
 
+            input_widgets.append(chbox)
             layout.addLayout(line3)
-
 
         vGroupBox.setLayout(layout)
 
-        return vGroupBox
+        return vGroupBox, input_widgets
 
+    def changeIntVals(self, text, name):
+        try:
+            self.__dict__[name] = int(text)
+        except ValueError:
+            pass
+
+    def changeFloatVals(self, text, name):
+        try:
+            self.__dict__[name] = float(text)
+        except ValueError:
+            pass
+
+    def changeCBoxVals(self, cboxval, name):
+        if cboxval == 0:
+            self.__dict__[name] = False
+        else:
+            self.__dict__[name] = True
 
 # below code allows exceptions to be reported for debugging the program
 # Back up the reference to the exceptionhook
