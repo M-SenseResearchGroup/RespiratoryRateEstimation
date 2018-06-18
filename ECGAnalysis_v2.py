@@ -970,41 +970,41 @@ class ECGAnalysis(object):
                 ax.legend(handles=[b_p, r_p, line1])
 
 
-fprefix = 'C:\\Users\\Lukas Adamowicz\\Dropbox\\Masters\\Project\\RespiratoryRate_HeartRate\\Python RRest\\'
-
-fprefix_val = 'C:\\Users\\Lukas Adamowicz\\Dropbox\\Masters\\Project\\RespiratoryRate_HeartRate\\' + \
-              'RespiratoryRateEstimation\\Validation_Data\\RespRate_PPG_Phone\\'
-
-subj_ids = listdir(fprefix_val)
-
-data = dict()
-for s in subj_ids:
-    data[s] = EcgData()
-    annot = np.genfromtxt(fprefix_val+s+'\\annotations.csv', skip_header=1, delimiter=',', dtype=str)
-
-    bb = float(annot[0,-3][1:-1])
-    be = float(annot[0,-2][1:-1])
-    ab = float(annot[1,-3][1:-1])
-    ae = float(annot[1,-2][1:-1])
-
-    floc = fprefix_val + s + '\\ecg_lead_ii\\'
-    floc += listdir(floc)[0] + '\\'
-    floc += listdir(floc)[0] + '\\'
-    t, v = np.genfromtxt(floc+'elec.csv', skip_header=1, unpack=True, delimiter=',')
-
-    bib = np.argmin(abs(t-bb))
-    bie = np.argmin(abs(t-be))
-    aib = np.argmin(abs(t-ab))
-    aie = np.argmin(abs(t-ae))
-
-    t -= t[0]
-    t /= 1000
-
-    data[s].t['Before Exercise'] = t[bib:bie]
-    data[s].v['Before Exercise'] = v[bib:bie]
-
-    data[s].t['After Exercise'] = t[aib:aie]
-    data[s].v['After Exercise'] = v[aib:aie]
+# fprefix = 'C:\\Users\\Lukas Adamowicz\\Dropbox\\Masters\\Project\\RespiratoryRate_HeartRate\\Python RRest\\'
+#
+# fprefix_val = 'C:\\Users\\Lukas Adamowicz\\Dropbox\\Masters\\Project\\RespiratoryRate_HeartRate\\' + \
+#               'RespiratoryRateEstimation\\Validation_Data\\RespRate_PPG_Phone\\'
+#
+# subj_ids = listdir(fprefix_val)
+#
+# data = dict()
+# for s in subj_ids:
+#     data[s] = EcgData()
+#     annot = np.genfromtxt(fprefix_val+s+'\\annotations.csv', skip_header=1, delimiter=',', dtype=str)
+#
+#     bb = float(annot[0,-3][1:-1])
+#     be = float(annot[0,-2][1:-1])
+#     ab = float(annot[1,-3][1:-1])
+#     ae = float(annot[1,-2][1:-1])
+#
+#     floc = fprefix_val + s + '\\ecg_lead_ii\\'
+#     floc += listdir(floc)[0] + '\\'
+#     floc += listdir(floc)[0] + '\\'
+#     t, v = np.genfromtxt(floc+'elec.csv', skip_header=1, unpack=True, delimiter=',')
+#
+#     bib = np.argmin(abs(t-bb))
+#     bie = np.argmin(abs(t-be))
+#     aib = np.argmin(abs(t-ab))
+#     aie = np.argmin(abs(t-ae))
+#
+#     t -= t[0]
+#     t /= 1000
+#
+#     data[s].t['Before Exercise'] = t[bib:bie]
+#     data[s].v['Before Exercise'] = v[bib:bie]
+#
+#     data[s].t['After Exercise'] = t[aib:aie]
+#     data[s].v['After Exercise'] = v[aib:aie]
 
 # data.t['middle'],data.v['middle'] = np.genfromtxt(fprefix+'middle_ecg.csv', skip_header=0, unpack=True, delimiter=',')
 
