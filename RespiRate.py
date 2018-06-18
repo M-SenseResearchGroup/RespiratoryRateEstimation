@@ -8,8 +8,9 @@ Python 3.6.5 on Windows 10 with 64-bit Anaconda
 """
 
 import sys
-from os import getcwd()
-from PyQt5.QtWidgets import QMainWindow, QApplication, QFileDialog, QAction, qApp, QMessageBox, QMenu
+from os import getcwd
+from PyQt5.QtWidgets import QMainWindow, QApplication, QFileDialog, QAction, qApp, QMessageBox, QMenu, QGridLayout, \
+    QLabel, QLineEdit, QHBoxLayout, QVBoxLayout, QGroupBox, QDialog, QCheckBox
 from PyQt5.QtGui import QIcon
 from ECGAnalysis_v2 import ECGAnalysis, EcgData
 from numpy import loadtxt, array, argmin
@@ -24,6 +25,8 @@ class RespiRate(QMainWindow):
         self.annots = None  # allocate for annotations to allow for checking later on
 
         self.loc = getcwd()  # get the location of the file.
+
+        self.filtSet= FilterSettingsWindow(self)
 
         self.initUI()
 
@@ -65,13 +68,21 @@ class RespiRate(QMainWindow):
         openData.setStatusTip('Open saved data')
         openData.triggered.connect(self.open_serialized_data)
 
+        # Open settings window
+        filtSetAct = QAction('Filter Settings', self)
+        filtSetAct.setStatusTip('Open filter settings dialog')
+        filtSetAct.triggered.connect(self.open_settings)
+
         menubar = self.menuBar()
         filemenu = menubar.addMenu('&File')
+        settingsmenu = menubar.addMenu('&Settings')
 
         filemenu.addMenu(importMenu)
         filemenu.addAction(openData)
         filemenu.addAction(self.saveData)
         filemenu.addAction(exitAct)
+
+        settingsmenu.addAction(filtSetAct)
 
         self.show()
 
@@ -167,6 +178,101 @@ class RespiRate(QMainWindow):
                                      f"{len(self.data.t.keys())} events.", QMessageBox.Ok)
             self.saveData.setDisabled(False)
         self.sbar.clearMessage()  # clear the status bar message when done importing
+
+    def open_settings(self):
+        self.filtSet.show()
+
+
+class FilterSettingsWindow(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+        # set defaults
+        self.mov_len_def = 150  # moving average filter length (samples) default
+        self.delay_def = 175  # delay (ms) to wait before declaring half peak default
+
+        self.elf_cut_def = 3.0  # Eliminate low frequency default cutoff (Hz)
+        self.elf_N_def = 1  # Eliminate low frequency default filter order
+
+        self.evhf_cut_def = 20.0  # eliminate very high frequency default cutoff (Hz)
+        self.evhf_N_def = 1  # eliminate very high frequency default filter order
+        self.evhf_det_def = True  # detrend input data to eliminate very high frequency default
+
+        self.emf_cut_def = 60.0  # eliminate mains frequency default cutoff (Hz)
+        self.emf_Q_def = 10  # eliminate mains frequency default notch filter quality
+        self.emf_det_def = True  # detrend input data to eliminate mains frequency default
+
+        self.esc_cut_def = 0.5  # eliminate sub-cardiac frequency default cutoff (Hz)
+        self.esc_N_def = 4  # eliminate sub-cardiac frequency default order
+
+        self.initUI()
+
+    def initUI(self):
+        self.setGeometry(300, 300, 250, 150)
+        self.setWindowTitle('Filter Settings')
+
+        self.elfGroupBox = self.createFilterOptions('Eliminate Low Frequencies', self.elf_cut_def, self.elf_N_def)
+        self.evhfGroupBox = self.createFilterOptions('Eliminate Very High Frequencies', self.evhf_cut_def,
+                                                     self.evhf_N_def, self.evhf_det_def)
+        self.emfGroupBox = self.createFilterOptions('Eliminate Mains Frequencies', self.emf_cut_def, self.emf_Q_def,
+                                                    self. emf_det_def)
+        self.escGroupBox = self.createFilterOptions('Eliminate Sub-Cardiac Frequencies', self.esc_cut_def,
+                                                    self.esc_N_def)
+
+        self.mafGroupBox = QGroupBox('Moving Average Filter')
+        mafLayout = QHBoxLayout()
+        mafLabel = QLabel('Length: ', self)
+        mafTxt = QLineEdit(self)
+        mafTxt.setText(str(self.mov_len_def))
+
+        mafLayout.addWidget(mafLabel)
+        mafLayout.addWidget(mafTxt)
+        self.mafGroupBox.setLayout(mafLayout)
+
+        windowLayout = QVBoxLayout()
+        windowLayout.addWidget(self.elfGroupBox)
+        windowLayout.addWidget(self.evhfGroupBox)
+        windowLayout.addWidget(self.emfGroupBox)
+        windowLayout.addWidget(self.escGroupBox)
+        windowLayout.addWidget(self.mafGroupBox)
+        self.setLayout(windowLayout)
+
+    def createFilterOptions(self, title, cut_def, N_def, det_def=None):
+        vGroupBox = QGroupBox(title)
+        layout = QVBoxLayout()
+
+        line1 = QHBoxLayout()
+        label1 = QLabel('Cutoff (Hz):', self)
+        txtbox1 = QLineEdit(self)
+        txtbox1.setText(str(cut_def))
+        line1.addWidget(label1)
+        line1.addWidget(txtbox1)
+
+        layout.addLayout(line1)
+
+        line2 = QHBoxLayout()
+        label2 = QLabel('Order (Hz):', self)
+        txtbox2 = QLineEdit(self)
+        txtbox2.setText(str(N_def))
+        line2.addWidget(label2)
+        line2.addWidget(txtbox2)
+
+        layout.addLayout(line2)
+
+        if not isinstance(det_def, type(None)):
+            line3 = QHBoxLayout()
+            label3 = QLabel('Detrend?', self)
+            chbox = QCheckBox(self)
+            chbox.setChecked(det_def)
+            line3.addWidget(label3)
+            line3.addWidget(chbox)
+
+            layout.addLayout(line3)
+
+
+        vGroupBox.setLayout(layout)
+
+        return vGroupBox
 
 
 # below code allows exceptions to be reported for debugging the program
