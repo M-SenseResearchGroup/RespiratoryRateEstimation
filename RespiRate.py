@@ -10,11 +10,14 @@ Python 3.6.5 on Windows 10 with 64-bit Anaconda
 import sys
 from os import getcwd
 from PyQt5.QtWidgets import QMainWindow, QApplication, QFileDialog, QAction, qApp, QMessageBox, QMenu, QToolTip, \
-    QLabel, QLineEdit, QHBoxLayout, QVBoxLayout, QGroupBox, QDialog, QCheckBox, QPushButton
+    QLabel, QLineEdit, QHBoxLayout, QVBoxLayout, QGroupBox, QDialog, QCheckBox, QPushButton, QSizePolicy, QWidget
 from PyQt5.QtGui import QIcon
 from ECGAnalysis_v2 import ECGAnalysis, EcgData
 from numpy import loadtxt, array, argmin
 from pickle import load as Pload, dump as Pdump
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
+import matplotlib.pyplot as pl
 
 
 class RespiRate(QMainWindow):
@@ -26,12 +29,15 @@ class RespiRate(QMainWindow):
 
         self.loc = getcwd()  # get the location of the file.
 
-        self.filtSet= FilterSettingsWindow(self)
+        self.filtSet = FilterSettingsWindow(self)
 
         self.initUI()
 
+        self.form_widget = FormWidget(self)
+        self.setCentralWidget(self.form_widget)
+
     def initUI(self):
-        self.setGeometry(100, 100, 650, 450)
+        self.setGeometry(100, 100, 850, 650)
         self.setWindowTitle('RespiRate')
 
         # save imported raw data
@@ -42,7 +48,7 @@ class RespiRate(QMainWindow):
         self.saveData.triggered.connect(self.save_data)
 
         # Exit menu action
-        exitAct = QAction(QIcon('exit.png'), '&Exit', self)
+        exitAct = QAction(QIcon('next.png'), '&Exit', self)
         exitAct.setShortcut('Ctrl+Q')
         exitAct.setStatusTip('Exit application')
         exitAct.triggered.connect(qApp.quit)
@@ -84,7 +90,64 @@ class RespiRate(QMainWindow):
 
         settingsmenu.addAction(filtSetAct)
 
+        # toolbar actions
+        # TODO change icon
+        self.elfAct = QAction(QIcon('next.png'), 'Eliminate Low Frequencies', self)
+        self.elfAct.setToolTip('Eliminate Low Frequencies')
+        self.elfAct.setDisabled(True)
+        self.elfAct.triggered.connect(self.runELF)
+
+        # TODO change icon
+        self.evhfAct = QAction(QIcon('next.png'), 'Eliminate Very High Frequencies', self)
+        self.evhfAct.setToolTip('Eliminate Very High Frequencies')
+        self.evhfAct.setDisabled(True)
+        self.evhfAct.triggered.connect(self.runEVHF)
+
+        # TODO change icon
+        self.emfAct = QAction(QIcon('next.png'), 'Eliminate Mains Frequencies', self)
+        self.emfAct.setToolTip('Eliminate Mains Frequencies')
+        self.emfAct.setDisabled(True)
+        self.emfAct.triggered.connect(self.runEMF)
+
+        # TODO change icon
+        self.cliAct = QAction(QIcon('next.png'), 'Check Lead Inversion', self)
+        self.cliAct.setToolTip('Check for lead inversion')
+        self.cliAct.setDisabled(True)
+        self.cliAct.triggered.connect(self.runCLI)
+
+        # TODO change icon
+        self.escAct = QAction(QIcon('next.png'), 'Eliminate Sub-cardiac Frequencies', self)
+        self.escAct.setToolTip('Eliminate Sub-cardiac Frequencies')
+        self.escAct.setDisabled(True)
+        self.escAct.triggered.connect(self.runESC)
+
+        # toolbar setup
+        self.toolbar = self.addToolBar('Process Data')
+        self.toolbar.addAction(self.elfAct)
+        self.toolbar.addAction(self.evhfAct)
+        self.toolbar.addAction(self.cliAct)
+        self.toolbar.addAction(self.emfAct)
+
         self.show()
+
+    def runELF(self):
+        self.ECG.ElimLowFreq(cutoff=self.filtSet.elf_cut, N=self.filtSet.elf_N)
+        self.evhfAct.setDisabled(False)
+
+    def runEVHF(self):
+        self.ECG.ElimVeryHighFreq(cutoff=self.filtSet.evhf_cut, N=self.filtSet.evhf_N, detrend=self.filtSet.evhf_det)
+        self.emfAct.setDisabled(False)
+
+    def runEMF(self):
+        self.ECG.ElimMainsFreq(cutoff=self.filtSet.emf_cut, Q=self.filtSet.emf_Q, detrend=self.filtSet.emf_det)
+        self.cliAct.setDisabled(False)
+
+    def runCLI(self):
+        self.ECG.CheckLeadInversion()
+        self.escAct.setDisabled(False)
+
+    def runESC(self):
+        self.ECG.ElimSubCardiacFreq(cutoff=self.filtSet.esc_cut, N=self.filtSet.esc_N)
 
     def save_data(self):
         """
@@ -115,7 +178,10 @@ class RespiRate(QMainWindow):
             fid.close()
             self.sbar.clearMessage()
 
+            self.ECG = ECGAnalysis(self.data, moving_filter_len=self.filtSet.mov_len)
+
             self.saveData.setDisabled(False)
+            self.elfAct.setDisabled(False)
 
     def open_annotation_mc10(self):
         """
@@ -176,11 +242,42 @@ class RespiRate(QMainWindow):
 
                 QMessageBox.question(self, "Raw Data Import", f"Imported raw data and segmented into " +\
                                      f"{len(self.data.t.keys())} events.", QMessageBox.Ok)
-            self.saveData.setDisabled(False)
+
+            for ev in self.data.t.keys():
+                self.data.t[ev] -= self.data.t[ev][0]
+                self.data.t[ev] /= 1000
+
+            self.ECG = ECGAnalysis(self.data, moving_filter_len=self.filtSet.mov_len)
+            self.saveData.setDisabled(False)  # allow data saving
+            self.elfAct.setDisabled(False)  # allow data processing
         self.sbar.clearMessage()  # clear the status bar message when done importing
 
     def open_settings(self):
         self.filtSet.show()
+
+
+class FormWidget(QWidget):
+    def __init__(self, parent):
+        super(FormWidget, self).__init__(parent)
+
+
+
+class PlotCanvas(FigureCanvas):
+    def __init__(self, parent=None, width=5, height=4, dpi=100):
+        fig = Figure(figsize=(width, height), dpi=dpi)
+
+        FigureCanvas.__init__(self, fig)
+        self.setParent(parent)
+
+        FigureCanvas.setSizePolicy(self, QSizePolicy.Expanding, QSizePolicy.Expanding)
+        FigureCanvas.updateGeometry(self)
+        # self.plot()
+
+    def plot(self, x, y):
+        self.ax = self.figure.add_subplot(111)
+        self.ax.plot(x, y)
+
+        self.draw()
 
 
 class FilterSettingsWindow(QDialog):
