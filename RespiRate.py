@@ -156,50 +156,71 @@ class RespiRate(QMainWindow):
         self.sbar.showMessage('Eliminating low frequencies...')
         self.ECG.ElimLowFreq(cutoff=self.filtSet.elf_cut, N=self.filtSet.elf_N)
         self.evhfAct.setDisabled(False)
+
+        if 'Filtered' not in [self.form_widget.stepChoice.itemText(i) for i in
+                                        range(self.form_widget.stepChoice.count())]:
+            self.form_widget.stepChoice.addItem('Filtered')
         self.sbar.clearMessage()
 
     def runEVHF(self):
         self.sbar.showMessage('Eliminating very high frequencies...')
         self.ECG.ElimVeryHighFreq(cutoff=self.filtSet.evhf_cut, N=self.filtSet.evhf_N, detrend=self.filtSet.evhf_det)
         self.emfAct.setDisabled(False)
+
         self.sbar.clearMessage()
 
     def runEMF(self):
         self.sbar.showMessage('Eliminating mains frequencies...')
         self.ECG.ElimMainsFreq(cutoff=self.filtSet.emf_cut, Q=self.filtSet.emf_Q, detrend=self.filtSet.emf_det)
         self.cliAct.setDisabled(False)
+
         self.sbar.clearMessage()
 
     def runCLI(self):
         self.sbar.showMessage('Checking and fixing lead inversion...')
         self.ECG.CheckLeadInversion()
         self.escAct.setDisabled(False)
+
         self.sbar.clearMessage()
 
     def runESC(self):
         self.sbar.showMessage('Eliminating sub-cardiac frequencies...')
         self.ECG.ElimSubCardiacFreq(cutoff=self.filtSet.esc_cut, N=self.filtSet.esc_N)
         self.derAct.setDisabled(False)
+
         self.sbar.clearMessage()
 
     def runDER(self):
         self.sbar.showMessage('Calculating derivative filter...')
         self.ECG.DerivativeFilter()
         self.maAct.setDisabled(False)
+
+        if 'Derivative Filter' not in [self.form_widget.stepChoice.itemText(i) for i in
+                                        range(self.form_widget.stepChoice.count())]:
+            self.form_widget.stepChoice.addItem('Derivative Filter')
+
         self.sbar.clearMessage()
 
     def runMA(self):
         self.sbar.showMessage('Calculating moving average filter...')
         self.ECG.MovingAverageFilter()
         self.rpkAct.setDisabled(False)
+
+        if 'Moving Average' not in [self.form_widget.stepChoice.itemText(i) for i in
+                                    range(self.form_widget.stepChoice.count())]:
+            self.form_widget.stepChoice.addItem('Moving Average')
+
         self.sbar.clearMessage()
 
     def runRPK(self):
         self.sbar.showMessage('Detecting R-peaks...')
         self.ECG.DetectRPeaks()
-        self.sbar.clearMessage()
 
-        # self.form_widget.ax.plot(self.ECG.t['Before Exercise'], self.ECG.v['Before Exercise'])
+        if 'R-Peaks' not in [self.form_widget.stepChoice.itemText(i) for i in
+                             range(self.form_widget.stepChoice.count())]:
+            self.form_widget.stepChoice.addItem('R-Peaks')
+
+        self.sbar.clearMessage()
 
 
     def save_data(self):
@@ -237,6 +258,7 @@ class RespiRate(QMainWindow):
             self.elfAct.setDisabled(False)
             self.form_widget.stepChoice.setDisabled(False)
             self.form_widget.eventChoice.setDisabled(False)
+            self.form_widget.plotButton.setDisabled(False)
 
             self.form_widget.stepChoice.addItem('Raw Data')
 
@@ -313,6 +335,7 @@ class RespiRate(QMainWindow):
 
             self.form_widget.stepChoice.setDisabled(False)
             self.form_widget.eventChoice.setDisabled(False)
+            self.form_widget.plotButton.setDisabled(False)
 
             if 'Raw Data' not in [self.form_widget.stepChoice.itemText(i) for i in
                                   range(self.form_widget.stepChoice.count())]:
@@ -334,11 +357,12 @@ class FormWidget(QWidget):
     def __init__(self, parent):
         super(FormWidget, self).__init__(parent)
 
+        self.parent = parent
         self.layout = QVBoxLayout(self)
         self.setLayout(self.layout)
 
         self.figure = Figure()
-        self.figure.set_facecolor("none")
+        self.axes = self.figure.add_subplot(111)
         self.canvas = FigureCanvas(self.figure)
         self.canvas.setContentsMargins(0, 0, 0, 0)
 
@@ -353,10 +377,45 @@ class FormWidget(QWidget):
         self.stepChoice.setDisabled(True)
         self.eventChoice.setDisabled(True)
 
+        self.plotButton = QPushButton('Plot', self)
+        self.plotButton.setDisabled(True)
+        self.plotButton.clicked.connect(self.plot)
+
         self.dropDownLayout.addWidget(self.stepChoice)
         self.dropDownLayout.addWidget(self.eventChoice)
+        self.dropDownLayout.addWidget(self.plotButton)
 
         self.layout.addLayout(self.dropDownLayout)
+
+    def plot(self):
+        self.axes.clear()
+        step = str(self.stepChoice.currentText())
+        event = str(self.eventChoice.currentText())
+
+        if step == 'Raw Data':
+            self.axes.plot(self.parent.data.t[event], self.parent.data.v[event])
+            self.axes.set_ylabel('Voltage (mV)')
+            self.axes.set_xlabel('Time [s]')
+        elif step == 'R-Peaks':
+            self.axes.plot(self.parent.ECG.t[event], self.parent.ECG.v[event])
+            self.axes.plot(self.parent.ECG.r_pks[event][:, 0], self.parent.ECG.r_pks[event][:, 1], 'ko')
+            self.axes.set_ylabel('Voltage (mV)')
+            self.axes.set_xlabel('Time [s]')
+        elif step == 'Filtered':
+            self.axes.plot(self.parent.ECG.t[event], self.parent.ECG.v[event])
+            self.axes.set_ylabel('Voltage (mV)')
+            self.axes.set_xlabel('Time [s]')
+        elif step == 'Derivative Filter':
+            self.axes.plot(self.parent.ECG.t_der[event], self.parent.ECG.v_der[event])
+            self.axes.set_ylabel('Voltage (mV)')
+            self.axes.set_xlabel('Time [s]')
+        elif step == 'Moving Average':
+            self.axes.plot(self.parent.ECG.t_ma[event], self.parent.ECG.v_ma[event])
+            self.axes.set_ylabel('Voltage (mV)')
+            self.axes.set_xlabel('Time [s]')
+
+        self.canvas.draw()
+
 
 
 class FilterSettingsWindow(QDialog):

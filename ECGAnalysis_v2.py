@@ -303,7 +303,7 @@ class ECGAnalysis(object):
 
         for key in self.vd:
             self.v_der[key] = (-self.v[key][:-4]-2*self.v[key][1:-3]+2*self.v[key][3:-1]+self.v[key][4:])/(8*self.dt)
-            self.t_der[key] = self.t[key][:-2]*1
+            self.t_der[key] = self.t[key][2:-2]*1
             self.t_der[key][:2] = 0  # timsteps are cut by 2 on either end
 
         self.v_der[key] = np.insert(self.v_der[key],0,[0]*2)
