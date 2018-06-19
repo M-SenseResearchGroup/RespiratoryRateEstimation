@@ -10,15 +10,15 @@ Python 3.6.5 on Windows 10 with 64-bit Anaconda
 import sys
 from os import getcwd
 from PyQt5.QtWidgets import QMainWindow, QApplication, QFileDialog, QAction, qApp, QMessageBox, QMenu, QToolTip, \
-    QLabel, QLineEdit, QHBoxLayout, QVBoxLayout, QGroupBox, QDialog, QCheckBox, QPushButton, QSizePolicy, QWidget
+    QLabel, QLineEdit, QHBoxLayout, QVBoxLayout, QGroupBox, QDialog, QCheckBox, QPushButton, QSizePolicy, QWidget, \
+    QComboBox
 from PyQt5.QtGui import QIcon
 from ECGAnalysis_v2 import ECGAnalysis, EcgData
 from numpy import loadtxt, array, argmin
 from pickle import load as Pload, dump as Pdump
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
-import matplotlib.pyplot as pl
-
 
 class RespiRate(QMainWindow):
     def __init__(self):
@@ -121,33 +121,86 @@ class RespiRate(QMainWindow):
         self.escAct.setDisabled(True)
         self.escAct.triggered.connect(self.runESC)
 
+        # TODO change icon
+        self.derAct = QAction(QIcon('next.png'), 'Derivative Filter', self)
+        self.derAct.setToolTip('Calculate Derivative Filter')
+        self.derAct.setDisabled(True)
+        self.derAct.triggered.connect(self.runDER)
+
+        # TODO change icon
+        self.maAct = QAction(QIcon('next.png'), 'Moving Average Filter', self)
+        self.maAct.setToolTip('Calculating Moving Average')
+        self.maAct.setDisabled(True)
+        self.maAct.triggered.connect(self.runMA)
+
+        # TODO change icon
+        self.rpkAct = QAction(QIcon('next.png'), 'Detect R-Peaks', self)
+        self.rpkAct.setToolTip('Determine R-peak locations')
+        self.rpkAct.setDisabled(True)
+        self.rpkAct.triggered.connect(self.runRPK)
+
         # toolbar setup
         self.toolbar = self.addToolBar('Process Data')
         self.toolbar.addAction(self.elfAct)
         self.toolbar.addAction(self.evhfAct)
-        self.toolbar.addAction(self.cliAct)
         self.toolbar.addAction(self.emfAct)
+        self.toolbar.addAction(self.cliAct)
+        self.toolbar.addAction(self.escAct)
+        self.toolbar.addAction(self.derAct)
+        self.toolbar.addAction(self.maAct)
+        self.toolbar.addAction(self.rpkAct)
 
         self.show()
 
     def runELF(self):
+        self.sbar.showMessage('Eliminating low frequencies...')
         self.ECG.ElimLowFreq(cutoff=self.filtSet.elf_cut, N=self.filtSet.elf_N)
         self.evhfAct.setDisabled(False)
+        self.sbar.clearMessage()
 
     def runEVHF(self):
+        self.sbar.showMessage('Eliminating very high frequencies...')
         self.ECG.ElimVeryHighFreq(cutoff=self.filtSet.evhf_cut, N=self.filtSet.evhf_N, detrend=self.filtSet.evhf_det)
         self.emfAct.setDisabled(False)
+        self.sbar.clearMessage()
 
     def runEMF(self):
+        self.sbar.showMessage('Eliminating mains frequencies...')
         self.ECG.ElimMainsFreq(cutoff=self.filtSet.emf_cut, Q=self.filtSet.emf_Q, detrend=self.filtSet.emf_det)
         self.cliAct.setDisabled(False)
+        self.sbar.clearMessage()
 
     def runCLI(self):
+        self.sbar.showMessage('Checking and fixing lead inversion...')
         self.ECG.CheckLeadInversion()
         self.escAct.setDisabled(False)
+        self.sbar.clearMessage()
 
     def runESC(self):
+        self.sbar.showMessage('Eliminating sub-cardiac frequencies...')
         self.ECG.ElimSubCardiacFreq(cutoff=self.filtSet.esc_cut, N=self.filtSet.esc_N)
+        self.derAct.setDisabled(False)
+        self.sbar.clearMessage()
+
+    def runDER(self):
+        self.sbar.showMessage('Calculating derivative filter...')
+        self.ECG.DerivativeFilter()
+        self.maAct.setDisabled(False)
+        self.sbar.clearMessage()
+
+    def runMA(self):
+        self.sbar.showMessage('Calculating moving average filter...')
+        self.ECG.MovingAverageFilter()
+        self.rpkAct.setDisabled(False)
+        self.sbar.clearMessage()
+
+    def runRPK(self):
+        self.sbar.showMessage('Detecting R-peaks...')
+        self.ECG.DetectRPeaks()
+        self.sbar.clearMessage()
+
+        # self.form_widget.ax.plot(self.ECG.t['Before Exercise'], self.ECG.v['Before Exercise'])
+
 
     def save_data(self):
         """
@@ -182,6 +235,13 @@ class RespiRate(QMainWindow):
 
             self.saveData.setDisabled(False)
             self.elfAct.setDisabled(False)
+            self.form_widget.stepChoice.setDisabled(False)
+            self.form_widget.eventChoice.setDisabled(False)
+
+            self.form_widget.stepChoice.addItem('Raw Data')
+
+            for ev in self.data.t.keys():
+                self.form_widget.eventChoice.addItem(ev)
 
     def open_annotation_mc10(self):
         """
@@ -250,6 +310,20 @@ class RespiRate(QMainWindow):
             self.ECG = ECGAnalysis(self.data, moving_filter_len=self.filtSet.mov_len)
             self.saveData.setDisabled(False)  # allow data saving
             self.elfAct.setDisabled(False)  # allow data processing
+
+            self.form_widget.stepChoice.setDisabled(False)
+            self.form_widget.eventChoice.setDisabled(False)
+
+            if 'Raw Data' not in [self.form_widget.stepChoice.itemText(i) for i in
+                                  range(self.form_widget.stepChoice.count())]:
+                self.form_widget.stepChoice.addItem('Raw Data')
+
+            for ev in self.data.t.keys():
+                if ev not in [self.form_widget.eventChoice.itemText(i) for i in
+                              range(self.form_widget.eventChoice.count())]:
+                    self.form_widget.eventChoice.addItem(ev)
+
+
         self.sbar.clearMessage()  # clear the status bar message when done importing
 
     def open_settings(self):
@@ -260,24 +334,29 @@ class FormWidget(QWidget):
     def __init__(self, parent):
         super(FormWidget, self).__init__(parent)
 
+        self.layout = QVBoxLayout(self)
+        self.setLayout(self.layout)
 
+        self.figure = Figure()
+        self.figure.set_facecolor("none")
+        self.canvas = FigureCanvas(self.figure)
+        self.canvas.setContentsMargins(0, 0, 0, 0)
 
-class PlotCanvas(FigureCanvas):
-    def __init__(self, parent=None, width=5, height=4, dpi=100):
-        fig = Figure(figsize=(width, height), dpi=dpi)
+        self.canvas_tb = NavigationToolbar(self.canvas, self)
+        self.layout.addWidget(self.canvas_tb)
+        self.layout.addWidget(self.canvas)
 
-        FigureCanvas.__init__(self, fig)
-        self.setParent(parent)
+        self.dropDownLayout = QHBoxLayout(self)
 
-        FigureCanvas.setSizePolicy(self, QSizePolicy.Expanding, QSizePolicy.Expanding)
-        FigureCanvas.updateGeometry(self)
-        # self.plot()
+        self.stepChoice = QComboBox(self)
+        self.eventChoice = QComboBox(self)
+        self.stepChoice.setDisabled(True)
+        self.eventChoice.setDisabled(True)
 
-    def plot(self, x, y):
-        self.ax = self.figure.add_subplot(111)
-        self.ax.plot(x, y)
+        self.dropDownLayout.addWidget(self.stepChoice)
+        self.dropDownLayout.addWidget(self.eventChoice)
 
-        self.draw()
+        self.layout.addLayout(self.dropDownLayout)
 
 
 class FilterSettingsWindow(QDialog):
