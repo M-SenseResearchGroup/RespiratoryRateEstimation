@@ -9,9 +9,8 @@ Python 3.6.5 on Windows 10 with 64-bit Anaconda
 
 import sys
 from os import getcwd
-from PyQt5.QtWidgets import QMainWindow, QApplication, QFileDialog, QAction, qApp, QMessageBox, QMenu, QToolTip, \
-    QLabel, QLineEdit, QHBoxLayout, QVBoxLayout, QGroupBox, QDialog, QCheckBox, QPushButton, QSizePolicy, QWidget, \
-    QComboBox
+from PyQt5.QtWidgets import QMainWindow, QApplication, QFileDialog, QAction, qApp, QMessageBox, QMenu, \
+    QLabel, QLineEdit, QHBoxLayout, QVBoxLayout, QGroupBox, QDialog, QCheckBox, QPushButton, QWidget, QComboBox
 from PyQt5.QtGui import QIcon
 from ECGAnalysis_v2 import ECGAnalysis, EcgData
 from numpy import loadtxt, array, argmin
@@ -158,7 +157,7 @@ class RespiRate(QMainWindow):
         self.evhfAct.setDisabled(False)
 
         if 'Filtered' not in [self.form_widget.stepChoice.itemText(i) for i in
-                                        range(self.form_widget.stepChoice.count())]:
+                              range(self.form_widget.stepChoice.count())]:
             self.form_widget.stepChoice.addItem('Filtered')
         self.sbar.clearMessage()
 
@@ -196,7 +195,7 @@ class RespiRate(QMainWindow):
         self.maAct.setDisabled(False)
 
         if 'Derivative Filter' not in [self.form_widget.stepChoice.itemText(i) for i in
-                                        range(self.form_widget.stepChoice.count())]:
+                                       range(self.form_widget.stepChoice.count())]:
             self.form_widget.stepChoice.addItem('Derivative Filter')
 
         self.sbar.clearMessage()
@@ -247,7 +246,7 @@ class RespiRate(QMainWindow):
 
         if openFile:
             self.sbar.showMessage('Opening data file...')
-            fid = open(openFile,'rb')
+            fid = open(openFile, 'rb')
             self.data = Pload(fid)
             fid.close()
             self.sbar.clearMessage()
@@ -346,7 +345,6 @@ class RespiRate(QMainWindow):
                               range(self.form_widget.eventChoice.count())]:
                     self.form_widget.eventChoice.addItem(ev)
 
-
         self.sbar.clearMessage()  # clear the status bar message when done importing
 
     def open_settings(self):
@@ -415,7 +413,6 @@ class FormWidget(QWidget):
             self.axes.set_xlabel('Time [s]')
 
         self.canvas.draw()
-
 
 
 class FilterSettingsWindow(QDialog):
@@ -500,7 +497,6 @@ class FilterSettingsWindow(QDialog):
             self.emf_w[2].setChecked(self.emf_det_def)
             self.esc_w[0].setText(str(self.esc_cut_def))
             self.esc_w[1].setText(str(self.esc_N_def))
-
 
     def createFilterOptions(self, title, cut_name, N_name, det_name=None):
         vGroupBox = QGroupBox(title)
