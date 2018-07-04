@@ -11,7 +11,7 @@ import sys
 from os import getcwd
 from PyQt5.QtWidgets import QMainWindow, QApplication, QFileDialog, QAction, qApp, QMessageBox, QMenu, \
     QLabel, QLineEdit, QHBoxLayout, QVBoxLayout, QGroupBox, QDialog, QCheckBox, QPushButton, QWidget, QComboBox, \
-    QRadioButton, QButtonGroup
+    QRadioButton
 from PyQt5.QtGui import QIcon
 from ECGAnalysis_v2 import ECGAnalysis, EcgData
 from numpy import loadtxt, array, argmin, argwhere, append, insert
@@ -28,6 +28,7 @@ class RespiRate(QMainWindow):
 
         self.sbar = self.statusBar()  # new shorthand for status bar
         self.annots = None  # allocate for annotations to allow for checking later on
+        self.count_run = False  # set that the count method has not been run.  used for fusion run toggle with settings
 
         self.loc = getcwd()  # get the location of the file.
 
@@ -78,17 +79,18 @@ class RespiRate(QMainWindow):
         openData.triggered.connect(self.open_serialized_data)
 
         # Open filter settings window
-        filtSetAct = QAction('Filter Settings', self)
+        filtSetAct = QAction(QIcon('Icons\\filter.png'), 'Filter Settings', self)
         filtSetAct.setStatusTip('Open filter settings dialog')
         filtSetAct.triggered.connect(self.open_filter_settings)
 
         # Open settings window
-        setAct = QAction('Settings', self)
+        setAct = QAction(QIcon('Icons\\configure.png'), 'Settings', self)
         setAct.setStatusTip('Open settings dialog')
         setAct.triggered.connect(self.open_settings)
 
         menubar = self.menuBar()
         filemenu = menubar.addMenu('&File')
+        runmenu = menubar.addMenu('&Analysis')
         settingsmenu = menubar.addMenu('&Settings')
 
         filemenu.addMenu(importMenu)
@@ -100,74 +102,95 @@ class RespiRate(QMainWindow):
         settingsmenu.addAction(setAct)
 
         # toolbar actions
+        self.allAct = QAction(QIcon('Icons\\arrow-continue.png'), 'Run All', self)
+        self.allAct.setToolTip('Run all analysis')
+        self.allAct.setDisabled(True)
+        self.allAct.triggered.connect(self.runALL)
+
         # TODO change icon
-        self.elfAct = QAction(QIcon('next.png'), 'Eliminate Low Frequencies', self)
+        self.elfAct = QAction(QIcon('Icons\\next.png'), 'Eliminate Low Frequencies', self)
         self.elfAct.setToolTip('Eliminate Low Frequencies')
         self.elfAct.setDisabled(True)
         self.elfAct.triggered.connect(self.runELF)
 
         # TODO change icon
-        self.evhfAct = QAction(QIcon('next.png'), 'Eliminate Very High Frequencies', self)
+        self.evhfAct = QAction(QIcon('Icons\\next.png'), 'Eliminate Very High Frequencies', self)
         self.evhfAct.setToolTip('Eliminate Very High Frequencies')
         self.evhfAct.setDisabled(True)
         self.evhfAct.triggered.connect(self.runEVHF)
 
         # TODO change icon
-        self.emfAct = QAction(QIcon('next.png'), 'Eliminate Mains Frequencies', self)
+        self.emfAct = QAction(QIcon('Icons\\next.png'), 'Eliminate Mains Frequencies', self)
         self.emfAct.setToolTip('Eliminate Mains Frequencies')
         self.emfAct.setDisabled(True)
         self.emfAct.triggered.connect(self.runEMF)
 
         # TODO change icon
-        self.cliAct = QAction(QIcon('next.png'), 'Check Lead Inversion', self)
+        self.cliAct = QAction(QIcon('Icons\\next.png'), 'Check Lead Inversion', self)
         self.cliAct.setToolTip('Check for lead inversion')
         self.cliAct.setDisabled(True)
         self.cliAct.triggered.connect(self.runCLI)
 
         # TODO change icon
-        self.escAct = QAction(QIcon('next.png'), 'Eliminate Sub-cardiac Frequencies', self)
+        self.escAct = QAction(QIcon('Icons\\next.png'), 'Eliminate Sub-cardiac Frequencies', self)
         self.escAct.setToolTip('Eliminate Sub-cardiac Frequencies')
         self.escAct.setDisabled(True)
         self.escAct.triggered.connect(self.runESC)
 
         # TODO change icon
-        self.derAct = QAction(QIcon('next.png'), 'Derivative Filter', self)
+        self.derAct = QAction(QIcon('Icons\\next.png'), 'Derivative Filter', self)
         self.derAct.setToolTip('Calculate Derivative Filter')
         self.derAct.setDisabled(True)
         self.derAct.triggered.connect(self.runDER)
 
         # TODO change icon
-        self.maAct = QAction(QIcon('next.png'), 'Moving Average Filter', self)
+        self.maAct = QAction(QIcon('Icons\\next.png'), 'Moving Average Filter', self)
         self.maAct.setToolTip('Calculating Moving Average')
         self.maAct.setDisabled(True)
         self.maAct.triggered.connect(self.runMA)
 
         # TODO change icon
-        self.rpkAct = QAction(QIcon('next.png'), 'Detect R-Peaks', self)
+        self.rpkAct = QAction(QIcon('Icons\\next.png'), 'Detect R-Peaks', self)
         self.rpkAct.setToolTip('Determine R-peak locations')
         self.rpkAct.setDisabled(True)
         self.rpkAct.triggered.connect(self.runRPK)
 
         # TODO change icon
-        self.rrpAct = QAction(QIcon('next.png'), 'Extract RR Parameters', self)  # Respiratory rate params
+        self.rrpAct = QAction(QIcon('Icons\\next.png'), 'Extract RR Parameters', self)  # Respiratory rate params
         self.rrpAct.setToolTip('Extract Respiratory Rate Calculation Parameters')
         self.rrpAct.setDisabled(True)
         self.rrpAct.triggered.connect(self.runRRP)
 
         # TODO change icon
-        self.cntAct = QAction(QIcon('next.png'), 'Perform Count', self)  # count adv/orig
+        self.cntAct = QAction(QIcon('Icons\\next.png'), 'Perform Count', self)  # count adv/orig
         self.cntAct.setToolTip('Perform count method set in settings')
         self.cntAct.setDisabled(True)
         self.cntAct.triggered.connect(self.runCNT)
 
         # TODO change icon
-        self.fusAct = QAction(QIcon('next.png'), 'Fuse Estimates', self)
+        self.fusAct = QAction(QIcon('Icons\\next.png'), 'Fuse Estimates', self)
         self.fusAct.setToolTip('Fuse Respiratory Rate estimates')
         self.fusAct.setDisabled(True)
         self.fusAct.triggered.connect(self.runFUS)
 
+        runmenu.addAction(self.allAct)
+        runmenu.addSeparator()
+        runmenu.addAction(self.elfAct)
+        runmenu.addAction(self.evhfAct)
+        runmenu.addAction(self.emfAct)
+        runmenu.addAction(self.cliAct)
+        runmenu.addAction(self.escAct)
+        runmenu.addAction(self.derAct)
+        runmenu.addAction(self.maAct)
+        runmenu.addAction(self.rpkAct)
+        runmenu.addAction(self.rrpAct)
+        runmenu.addAction(self.cntAct)
+        runmenu.addAction(self.fusAct)
+
         # toolbar setup
         self.toolbar = self.addToolBar('Process Data')
+        self.toolbar.addAction(self.allAct)
+        self.toolbar.addSeparator()
         self.toolbar.addAction(self.elfAct)
         self.toolbar.addAction(self.evhfAct)
         self.toolbar.addAction(self.emfAct)
@@ -181,6 +204,20 @@ class RespiRate(QMainWindow):
         self.toolbar.addAction(self.fusAct)
 
         self.show()
+
+    def runALL(self):
+        self.runELF()
+        self.runEVHF()
+        self.runEMF()
+        self.runCLI()
+        self.runESC()
+        self.runDER()
+        self.runMA()
+        self.runRPK()
+        self.runRRP()
+        self.runCNT()
+        if self.settings.fuse:
+            self.runFUS()
 
     def runELF(self):
         self.sbar.showMessage('Eliminating low frequencies...')
@@ -267,8 +304,12 @@ class RespiRate(QMainWindow):
 
     def runCNT(self):
         steps = [self.form_widget.stepChoice.itemText(i) for i in range(self.form_widget.stepChoice.count())]
-        adv_steps = ['AM Respiratory Rate (Adv)', 'FM Respiratory Rate (Adv)', 'BW Respiratory Rate (Adv)']
-        orig_steps = ['AM Respiratory Rate (Orig)', 'FM Respiratory Rate (Orig)', 'BW Respiratory Rate (Orig)']
+        adv_steps = ['AM Respiratory Rate (Adv)', 'AM Respiratory Signal (Adv)',
+                     'FM Respiratory Rate (Adv)', 'FM Respiratory Signal (Adv)',
+                     'BW Respiratory Rate (Adv)', 'BW Respiratory Signal (Adv)']
+        orig_steps = ['AM Respiratory Rate (Orig)', 'AM Respiratory Signal (Orig)',
+                      'FM Respiratory Rate (Orig)', 'FM Respiratory Signal (Orig)',
+                      'BW Respiratory Rate (Orig)', 'BW Respiratory Signal (Orig)']
 
         if self.settings.count:
             self.sbar.showMessage('Performing Count Advanced method...')
@@ -292,8 +333,12 @@ class RespiRate(QMainWindow):
                 if astep in steps:
                     ind = self.form_widget.stepChoice.findText(astep)
                     self.form_widget.stepChoice.removeItem(ind)
-        self.fusAct.setDisabled(False)
+        if self.settings.fuse:
+            self.fusAct.setDisabled(False)
+        else:
+            self.fusAct.setDisabled(True)
 
+        self.count_run = True  # set value saying count method has been run
         self.sbar.clearMessage()
 
     def runFUS(self):
@@ -340,6 +385,7 @@ class RespiRate(QMainWindow):
             self.ECG = ECGAnalysis(self.data, moving_filter_len=self.filtSet.mov_len)
 
             self.saveData.setDisabled(False)
+            self.allAct.setDisabled(False)
             self.elfAct.setDisabled(False)
             self.form_widget.stepChoice.setDisabled(False)
             self.form_widget.eventChoice.setDisabled(False)
@@ -416,7 +462,8 @@ class RespiRate(QMainWindow):
 
             self.ECG = ECGAnalysis(self.data, moving_filter_len=self.filtSet.mov_len)
             self.saveData.setDisabled(False)  # allow data saving
-            self.elfAct.setDisabled(False)  # allow data processing
+            self.allAct.setDisabled(False)  # allow all data processing
+            self.elfAct.setDisabled(False)  # allow step-by-step data processing
 
             self.form_widget.stepChoice.setDisabled(False)
             self.form_widget.eventChoice.setDisabled(False)
@@ -507,17 +554,50 @@ class FormWidget(QWidget):
             self.axes.set_ylabel('2 point Instantaneous Heart Rate [BPM]')
             self.axes.set_xlabel('Time [s]')
         elif 'FM Respiratory Rate' in step:
-            self.axes.plot(self.parent.ECG.rr[event]['fm'][:, 0], self.parent.ECG.rr[event]['fm'][:, 1])
+            self.axes.plot(self.parent.ECG.rr[event]['fm'][:, 0], self.parent.ECG.rr[event]['fm'][:, 1], 'ko--')
             self.axes.set_xlabel('Time [s]')
             self.axes.set_ylabel('FM Respiratory Rate [BPM]')
+        elif 'FM Respiratory Signal' in step:
+            line1, = self.axes.plot(self.parent.ECG.rr_spl[event][:, 0], self.parent.ECG.rr_spl[event][:, 1],
+                                    label='FM Signal')
+            if self.parent.settings.plot_cntRange:
+                for st, sp in self.parent.ECG.brth_cyc[event]:
+                    self.axes.plot(self.parent.ECG.rr_spl[event][st:sp, 0], self.parent.ECG.rr_spl[event][st:sp, 1],
+                                   'r', alpha=0.25, linewidth=5)
+                red = Patch(color='red', alpha=0.25, label='Breath count range')
+                self.axes.legend(handles=[line1, red])
+            self.axes.set_ylabel('Signal')
+            self.axes.set_xlabel('Time [s]')
         elif 'AM Respiratory Rate' in step:
-            self.axes.plot(self.parent.ECG.rr[event]['am'][:, 0], self.parent.ECG.rr[event]['am'][:, 1])
+            self.axes.plot(self.parent.ECG.rr[event]['am'][:, 0], self.parent.ECG.rr[event]['am'][:, 1], 'ko--')
             self.axes.set_xlabel('Time [s]')
             self.axes.set_ylabel('AM Respiratory Rate [BPM]')
+        elif 'AM Respiratory Signal' in step:
+            line1, = self.axes.plot(self.parent.ECG.rr_spl[event][:, 0], self.parent.ECG.rr_spl[event][:, 2],
+                                    label='AM Signal')
+            if self.parent.settings.plot_cntRange:
+                for st, sp in self.parent.ECG.brth_cyc[event]:
+                    self.axes.plot(self.parent.ECG.rr_spl[event][st:sp, 0], self.parent.ECG.rr_spl[event][st:sp, 2],
+                                   'r', alpha=0.25, linewidth=5)
+                red = Patch(color='red', alpha=0.25, label='Breath count range')
+                self.axes.legend(handles=[line1, red])
+            self.axes.set_ylabel('Signal')
+            self.axes.set_xlabel('Time [s]')
         elif 'BW Respiratory Rate' in step:
-            self.axes.plot(self.parent.ECG.rr[event]['bw'][:, 0], self.parent.ECG.rr[event]['bw'][:, 1])
+            self.axes.plot(self.parent.ECG.rr[event]['bw'][:, 0], self.parent.ECG.rr[event]['bw'][:, 1], 'ko--')
             self.axes.set_xlabel('Time [s]')
             self.axes.set_ylabel('BW Respiratory Rate [BPM]')
+        elif 'BW Respiratory Signal' in step:
+            line1, = self.axes.plot(self.parent.ECG.rr_spl[event][:, 0], self.parent.ECG.rr_spl[event][:, 3],
+                                    label='BW Signal')
+            if self.parent.settings.plot_cntRange:
+                for st, sp in self.parent.ECG.brth_cyc[event]:
+                    self.axes.plot(self.parent.ECG.rr_spl[event][st:sp, 0], self.parent.ECG.rr_spl[event][st:sp, 3],
+                                   'r', alpha=0.25, linewidth=5)
+                red = Patch(color='red', alpha=0.25, label='Breath count range')
+                self.axes.legend(handles=[line1, red])
+            self.axes.set_ylabel('Signal')
+            self.axes.set_xlabel('Time [s]')
         elif step == 'Fused Respiratory Rate':
             line1, = self.axes.plot(self.parent.ECG.rr_fuse[event][:, 0], self.parent.ECG.rr_fuse[event][:, 1],
                                     label='Fused Estimate')
@@ -544,13 +624,14 @@ class FormWidget(QWidget):
             self.axes.set_xlabel('Time [s]')
             self.axes.set_ylabel('Fused Respiratory Rate [BPM]')
 
-
         self.canvas.draw()
 
 
 class SettingsWindow(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
+
+        self.parent = parent
 
         # set defaults
         self.del_def = 175  # search delay for R-peak detection in milliseconds
@@ -560,6 +641,7 @@ class SettingsWindow(QDialog):
 
         # plotting defaults
         self.plot_std_def = True  # plot standard deviation/low quality index on fused estimate
+        self.plot_cntRange_def = True  # plot the range over which count method is detecting breaths
 
         self.setDefaults()
 
@@ -596,12 +678,14 @@ class SettingsWindow(QDialog):
             self.fuse = self.fuse_def
             self.fuse_time = self.fuse_time_def
             self.plot_std = self.plot_std_def
+            self.plot_cntRange = self.plot_cntRange_def
         else:
             self.del_w.setText(str(self.del_def))
             self.cnt_w[0].setChecked(self.count_def)
             self.fus_w[0].setChecked(self.fuse_def)
             self.fus_w[1].setChecked(self.fuse_time_def)
-            self.plt_w[0].setChecked(self.plot_std_def)
+            self.plt_w[0].setChecked(self.plot_cntRange_def)
+            self.plt_w[1].setChecked(self.plot_std_def)
 
     def createRPeakOptions(self):
         vGroupBox = QGroupBox('R-Peak Detection')
@@ -673,17 +757,23 @@ class SettingsWindow(QDialog):
         vGroupBox = QGroupBox('Plotting Options')
         layout = QVBoxLayout()
 
+        cb_cnt = QCheckBox('Plot count range', self)
+        cb_cnt.setToolTip('Plot the range over which the count method is detecting breaths over the Respiratory signal')
+        cb_cnt.setChecked(self.plot_cntRange)
+        cb_cnt.stateChanged.connect(lambda: setattr(self, 'plot_cntRange', cb_cnt.isChecked()))
+
         cb_std = QCheckBox('Plot Fusion st. dev.', self)
         cb_std.setToolTip('Plot the standard deviation of the FM, AM, and BW estimates of respiratory rate along with '
                           'the fused estimate')
         cb_std.setChecked(self.plot_std)
         cb_std.stateChanged.connect(lambda: setattr(self, 'plot_std', cb_std.isChecked()))
 
+        layout.addWidget(cb_cnt)
         layout.addWidget(cb_std)
 
         vGroupBox.setLayout(layout)
 
-        return vGroupBox, [cb_std]
+        return vGroupBox, [cb_cnt, cb_std]
 
     def changeIntVals(self, text, var_name):
         try:
@@ -695,9 +785,13 @@ class SettingsWindow(QDialog):
         if cboxval == 0:
             self.fuse = False
             time_box.setDisabled(True)
+            if self.parent.count_run:
+                self.parent.fusAct.setDisabled(True)
         else:
             self.fuse = True
             time_box.setDisabled(False)
+            if self.parent.count_run:
+                self.parent.fusAct.setDisabled(False)
 
     def changeTimeVals(self, val):
         if val == 0:

@@ -10,7 +10,7 @@ import numpy as np
 import matplotlib.pyplot as pl
 import matplotlib.patches as mpatches
 from scipy import signal, interpolate
-from os import listdir
+from pickle import dump as pickle_dump, load as pickle_load
 
 
 class EcgData:
@@ -803,7 +803,7 @@ class ECGAnalysis(object):
                     ax[i].plot(self.rr_spl[key][maxpt, 0], rr_splf[maxpt, i], 'o')
                     ax[i].axhline(thr)
                     for st, sp in brth_cyc:
-                        ax[i].plot(self.rr_spl[key][st:sp,0], rr_splf[st:sp, i], 'r', linewidth=2, alpha=0.5)
+                        ax[i].plot(self.rr_spl[key][st:sp, 0], rr_splf[st:sp, i], 'r', linewidth=2, alpha=0.5)
 
                         ax[i].legend(title=f'Paramter: {param}')
                         ax[i].set_ylabel('R-R peak times [s]')
@@ -821,6 +821,7 @@ class ECGAnalysis(object):
         Vol 36 No 3, 2008.
         """
         self.rr = dict()  # allocate array for respiratory rate estimates
+        self.brth_cyc = dict()  # allocate storage for breath cycle
         for key in self.vd:
             self.rr[key] = dict()  # another dictionary since lengths of arrays
             # for different parameters will possibly be different sizes
@@ -836,18 +837,22 @@ class ECGAnalysis(object):
             mn = np.mean(self.rr_spl[key][:, 1:], axis=0)
 
             # remove mean and apply filter to input spline data
-            rr_splf[:, 0] = signal.filtfilt(b, a, self.rr_spl[key][:, 1]-mn[0])
-            rr_splf[:, 1] = signal.filtfilt(b, a, self.rr_spl[key][:, 2]-mn[1])
-            rr_splf[:, 2] = signal.filtfilt(b, a, self.rr_spl[key][:, 3]-mn[2])
+            # rr_splf[:, 0] = signal.filtfilt(b, a, self.rr_spl[key][:, 1]-mn[0])
+            # rr_splf[:, 1] = signal.filtfilt(b, a, self.rr_spl[key][:, 2]-mn[1])
+            # rr_splf[:, 2] = signal.filtfilt(b, a, self.rr_spl[key][:, 3]-mn[2])
 
             if debug:
                 f, ax = pl.subplots(3, figsize=(16, 9), sharex=True)
 
             for i, param in zip(range(3), ['fm', 'am', 'bw']):
+                # remove mean and apply filter to input spline data
+                inter = signal.filtfilt(b, a, self.rr_spl[key][:, i+1]-mn[i])
+                self.rr_spl[key][:, i+1] = inter
+
                 # step 2 - find local minima and maxima of filtered data
                 # get 3rd quartile, threshold is Q3*0.2
-                minpt = signal.argrelmin(rr_splf[:, i])[0]
-                maxpt = signal.argrelmax(rr_splf[:, i])[0]
+                minpt = signal.argrelmin(self.rr_spl[key][:, i+1])[0]
+                maxpt = signal.argrelmax(self.rr_spl[key][:, i+1])[0]
 
                 # step 3 - calculate absolute value diff. between subsequent local extrema
                 # 3rd quartile of differences, threshold = 0.1*Q3
@@ -857,20 +862,20 @@ class ECGAnalysis(object):
                 ext_diff = np.zeros(len(ext)-1)
                 for j in range(len(ext)-1):
                     if etp[j] != etp[j+1]:  # ie min followed by max or max followed by min
-                        ext_diff[j] = abs(rr_splf[ext[j], i]-rr_splf[ext[j+1], i])
+                        ext_diff[j] = abs(self.rr_spl[key][ext[j], i+1]-self.rr_spl[key][ext[j+1], i+1])
 
                 thr = 0.1*np.percentile(ext_diff, 75)  # threshold value
 
                 if debug:
-                    ax[i].plot(self.rr_spl[key][:, 0], rr_splf[:, i])
-                    ax[i].plot(self.rr_spl[key][minpt, 0], rr_splf[minpt, i], 'k+')
-                    ax[i].plot(self.rr_spl[key][maxpt, 0], rr_splf[maxpt, i], 'k+')
+                    ax[i].plot(self.rr_spl[key][:, 0], self.rr_spl[key][:, i+1])
+                    ax[i].plot(self.rr_spl[key][minpt, 0], self.rr_spl[key][minpt, i+1], 'k+')
+                    ax[i].plot(self.rr_spl[key][maxpt, 0], self.rr_spl[key][maxpt, i+1], 'k+')
 
                 rem = 0  # removed indices counter
                 # step 4 - remove any sets whose difference is less than the threshold
                 for j in range(len(ext)-1):
                     if etp[j-rem] != etp[j-rem+1]:
-                        if abs(rr_splf[ext[j-rem], i]-rr_splf[ext[j-rem+1], i]) < thr:
+                        if abs(self.rr_spl[key][ext[j-rem], i+1]-self.rr_spl[key][ext[j-rem+1], i+1]) < thr:
                             ext = np.delete(ext, [j-rem, j-rem+1])
                             etp = np.delete(etp, [j-rem, j-rem+1])
                             rem += 2
@@ -894,12 +899,13 @@ class ECGAnalysis(object):
                     self.rr[key][param][j] = [(self.rr_spl[key][brth_cyc[j][1], 0]+self.rr_spl[key][brth_cyc[j][0], 0])
                                               / 2, 1/(self.rr_spl[key][brth_cyc[j][1], 0] -
                                                       self.rr_spl[key][brth_cyc[j][0], 0])]
-
+                self.brth_cyc[key] = brth_cyc  # store in class attributes
                 if debug:
-                    ax[i].plot(self.rr_spl[key][ext, 0], rr_splf[ext, i], 'ro', alpha=0.5, markersize=0.5)
+                    ax[i].plot(self.rr_spl[key][ext, 0], self.rr_spl[key][ext, i+1], 'ro', alpha=0.5, markersize=0.5)
 
                     for st, sp in brth_cyc:
-                        ax[i].plot(self.rr_spl[key][st:sp, 0], rr_splf[st:sp, i], 'r', alpha=0.25, linewidth=5)
+                        ax[i].plot(self.rr_spl[key][st:sp, 0], self.rr_spl[key][st:sp, i+1], 'r', alpha=0.25,
+                                   linewidth=5)
         if debug:
             f.tight_layout()
             f.subplots_adjust(hspace=0)
@@ -971,48 +977,6 @@ class ECGAnalysis(object):
                 ax.legend(handles=[b_p, r_p, line1])
 
 
-# fprefix = 'C:\\Users\\Lukas Adamowicz\\Dropbox\\Masters\\Project\\RespiratoryRate_HeartRate\\Python RRest\\'
-#
-# fprefix_val = 'C:\\Users\\Lukas Adamowicz\\Dropbox\\Masters\\Project\\RespiratoryRate_HeartRate\\' + \
-#               'RespiratoryRateEstimation\\Validation_Data\\RespRate_PPG_Phone\\'
-# fprefix_val = 'C:\\Users\\Lukas Adamowicz\\Dropbox\\Masters\\Project - Bike Study\\RespiratoryRate_HeartRate\\' \
-#               'RespiratoryRateEstimation\\Validation_Data\\RespRate_PPG_Phone\\'
-#
-# subj_ids = listdir(fprefix_val)
-#
-# data = dict()
-# for s in subj_ids:
-#     data[s] = EcgData()
-#     annot = np.genfromtxt(fprefix_val+s+'\\annotations.csv', skip_header=1, delimiter=',', dtype=str)
-#
-#     bb = float(annot[0,-3][1:-1])
-#     be = float(annot[0,-2][1:-1])
-#     ab = float(annot[1,-3][1:-1])
-#     ae = float(annot[1,-2][1:-1])
-#
-#     floc = fprefix_val + s + '\\ecg_lead_ii\\'
-#     floc += listdir(floc)[0] + '\\'
-#     floc += listdir(floc)[0] + '\\'
-#     t, v = np.genfromtxt(floc+'elec.csv', skip_header=1, unpack=True, delimiter=',')
-#
-#     bib = np.argmin(abs(t-bb))
-#     bie = np.argmin(abs(t-be))
-#     aib = np.argmin(abs(t-ab))
-#     aie = np.argmin(abs(t-ae))
-#
-#     t -= t[0]
-#     t /= 1000
-#
-#     data[s].t['Before Exercise'] = t[bib:bie]
-#     data[s].v['Before Exercise'] = v[bib:bie]
-#
-#     data[s].t['After Exercise'] = t[aib:aie]
-#     data[s].v['After Exercise'] = v[aib:aie]
-#
-# # data.t['middle'],data.v['middle'] = np.genfromtxt(fprefix+'middle_ecg.csv', skip_header=0, unpack=True, delimiter=',')
-# #
-# # data.t['back'], data.v['back'] = np.genfromtxt(fprefix+'back_ecg.csv', skip_header=0, unpack=True, delimiter=',')
-# #
-# # data.t['forward'], data.v['forward'] = np.genfromtxt(fprefix+'forward_ecg.csv', skip_header=0, unpack=True, delimiter=',')
-#
+# f = open('..\\sample_EcgAnalysis_v2_data.pickle', 'rb')
+# data = pickle_load(f)
 # test = ECGAnalysis(data['KJ'])
