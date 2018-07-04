@@ -917,6 +917,8 @@ class ECGAnalysis(object):
         Plot resulting fused respiratory rate estimates
         """
         self.rr_fuse = dict()  # allocate dictionary for fused resp. rate estimates
+        self.lqi = dict()
+        self.st_dev = dict()
         for key in self.vd:
             # convert to BPM
             for param in self.rr[key].keys():
@@ -934,18 +936,18 @@ class ECGAnalysis(object):
                 tmin = max([self.rr[key]['fm'][0, 0], self.rr[key]['am'][0, 0], self.rr[key]['bw'][0, 0]])
                 tmax = min([self.rr[key]['fm'][-1, 0], self.rr[key]['am'][-1, 0], self.rr[key]['bw'][-1, 0]])
                 x = np.arange(tmin, tmax, 0.2)
-            self.lqi = np.array([False]*len(x))  # Low Quality Index
+            self.lqi[key] = np.array([False]*len(x))  # Low Quality Index
 
             fms = fmsf(x)
             ams = amsf(x)
             bws = bwsf(x)
 
-            self.st_dev = np.std(np.array([bws, ams, fms]), axis=0)
+            self.st_dev[key] = np.std(np.array([bws, ams, fms]), axis=0)
             rr = np.mean(np.array([bws, ams, fms]), axis=0)
 
-            for i in range(len(self.st_dev)):
-                if self.st_dev[i] > 4:
-                    self.lqi[i] = True  # if Standard Dev > 4 BPM Low Quality Index
+            for i in range(len(self.st_dev[key])):
+                if self.st_dev[key][i] > 4:
+                    self.lqi[key][i] = True  # if Standard Dev > 4 BPM Low Quality Index
 
             self.rr_fuse[key] = np.zeros((len(rr), 2))
             self.rr_fuse[key][:, 1] = rr
@@ -955,12 +957,12 @@ class ECGAnalysis(object):
                 f, ax = pl.subplots(figsize=(16, 5))
                 line1, = ax.plot(self.rr_fuse[key][:, 0], self.rr_fuse[key][:, 1], label='Fused Est.')
 
-                ind = np.argwhere(self.lqi[1:] != self.lqi[:-1]).flatten() + 1
-                ind = np.append(ind, len(self.lqi))
+                ind = np.argwhere(self.lqi[key][1:] != self.lqi[key][:-1]).flatten() + 1
+                ind = np.append(ind, len(self.lqi[key]))
                 ind = np.insert(ind, 0, 0)
                 for i1, i2 in zip(ind[:-1], ind[1:]+1):
-                    ax.fill_between(x[i1:i2], rr[i1:i2]-self.st_dev[i1:i2], rr[i1:i2]+self.st_dev[i1:i2], alpha=0.5,
-                                    color='red' if self.lqi[i1] else 'blue')
+                    ax.fill_between(x[i1:i2], rr[i1:i2]-self.st_dev[key][i1:i2], rr[i1:i2]+self.st_dev[key][i1:i2],
+                                    alpha=0.5, color='red' if self.lqi[key][i1] else 'blue')
                 ax.set_title(f'{key}')
 
                 b_p = mpatches.Patch(color='blue', alpha=0.5, label='St. Dev. < 4 BPM')

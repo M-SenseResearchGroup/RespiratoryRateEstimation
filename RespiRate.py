@@ -14,11 +14,12 @@ from PyQt5.QtWidgets import QMainWindow, QApplication, QFileDialog, QAction, qAp
     QRadioButton, QButtonGroup
 from PyQt5.QtGui import QIcon
 from ECGAnalysis_v2 import ECGAnalysis, EcgData
-from numpy import loadtxt, array, argmin
+from numpy import loadtxt, array, argmin, argwhere, append, insert
 from pickle import load as Pload, dump as Pdump
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
+from matplotlib.patches import Patch
 
 
 class RespiRate(QMainWindow):
@@ -518,11 +519,31 @@ class FormWidget(QWidget):
             self.axes.set_xlabel('Time [s]')
             self.axes.set_ylabel('BW Respiratory Rate [BPM]')
         elif step == 'Fused Respiratory Rate':
-            self.axes.plot(self.parent.ECG.rr_fuse[event][:, 0], self.parent.ECG.rr_fuse[event][:, 1],
-                           label='Fused Estimate')
+            line1, = self.axes.plot(self.parent.ECG.rr_fuse[event][:, 0], self.parent.ECG.rr_fuse[event][:, 1],
+                                    label='Fused Estimate')
+            if self.parent.settings.plot_std:
+                ind = argwhere(self.parent.ECG.lqi[event][1:] != self.parent.ECG.lqi[event][:-1]).flatten() + 1
+                ind = append(ind, len(self.parent.ECG.lqi[event]))
+                ind = insert(ind, 0, 0)
+
+                for i1, i2 in zip(ind[:-1], ind[1:]+1):
+                    self.axes.fill_between(self.parent.ECG.rr_fuse[event][i1:i2][:, 0],
+                                           self.parent.ECG.rr_fuse[event][i1:i2][:, 1] -
+                                           self.parent.ECG.st_dev[event][i1:i2],
+                                           self.parent.ECG.rr_fuse[event][i1:i2][:, 1] +
+                                           self.parent.ECG.st_dev[event][i1:i2],
+                                           alpha=0.5, color='red' if self.parent.ECG.lqi[event][i1] else 'blue')
+
+                    blue = Patch(color='blue', alpha=0.5, label='St. Dev. < 4 BPM')
+                    red = Patch(color='red', alpha=0.5, label='St. Dev. > 4 BPM')
+
+                    self.axes.legend(handles=[blue, red, line1], loc='best')
+            else:
+                self.axes.legend(loc='best')
+
             self.axes.set_xlabel('Time [s]')
             self.axes.set_ylabel('Fused Respiratory Rate [BPM]')
-            self.axes.legend()
+
 
         self.canvas.draw()
 
@@ -536,6 +557,9 @@ class SettingsWindow(QDialog):
         self.count_def = True  # true == count advanced, false == count original
         self.fuse_def = True  # perform fusion, defaults to True
         self.fuse_time_def = True  # use timings from respiratory rate parameter extraction
+
+        # plotting defaults
+        self.plot_std_def = True  # plot standard deviation/low quality index on fused estimate
 
         self.setDefaults()
 
@@ -551,6 +575,8 @@ class SettingsWindow(QDialog):
 
         fus_gb, self.fus_w = self.createFuseOptions()  # create smart fusion options
 
+        plt_gb, self.plt_w = self.createPlotOptions()  # create plot options
+
         resetDefaults = QPushButton('Reset Defaults', self)
         resetDefaults.setAutoDefault(False)
         resetDefaults.clicked.connect(lambda: self.setDefaults(clicked=True))
@@ -559,6 +585,7 @@ class SettingsWindow(QDialog):
         windowLayout.addWidget(del_gb)
         windowLayout.addWidget(cnt_gb)
         windowLayout.addWidget(fus_gb)
+        windowLayout.addWidget(plt_gb)
         windowLayout.addWidget(resetDefaults)
         self.setLayout(windowLayout)
 
@@ -568,11 +595,13 @@ class SettingsWindow(QDialog):
             self.count = self.count_def
             self.fuse = self.fuse_def
             self.fuse_time = self.fuse_time_def
+            self.plot_std = self.plot_std_def
         else:
             self.del_w.setText(str(self.del_def))
             self.cnt_w[0].setChecked(self.count_def)
             self.fus_w[0].setChecked(self.fuse_def)
             self.fus_w[1].setChecked(self.fuse_time_def)
+            self.plt_w[0].setChecked(self.plot_std_def)
 
     def createRPeakOptions(self):
         vGroupBox = QGroupBox('R-Peak Detection')
@@ -639,6 +668,22 @@ class SettingsWindow(QDialog):
         vGroupBox.setLayout(layout)
 
         return vGroupBox, [fuse, timing]
+
+    def createPlotOptions(self):
+        vGroupBox = QGroupBox('Plotting Options')
+        layout = QVBoxLayout()
+
+        cb_std = QCheckBox('Plot Fusion st. dev.', self)
+        cb_std.setToolTip('Plot the standard deviation of the FM, AM, and BW estimates of respiratory rate along with '
+                          'the fused estimate')
+        cb_std.setChecked(self.plot_std)
+        cb_std.stateChanged.connect(lambda: setattr(self, 'plot_std', cb_std.isChecked()))
+
+        layout.addWidget(cb_std)
+
+        vGroupBox.setLayout(layout)
+
+        return vGroupBox, [cb_std]
 
     def changeIntVals(self, text, var_name):
         try:
