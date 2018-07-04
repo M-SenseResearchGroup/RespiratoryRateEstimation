@@ -10,7 +10,8 @@ Python 3.6.5 on Windows 10 with 64-bit Anaconda
 import sys
 from os import getcwd
 from PyQt5.QtWidgets import QMainWindow, QApplication, QFileDialog, QAction, qApp, QMessageBox, QMenu, \
-    QLabel, QLineEdit, QHBoxLayout, QVBoxLayout, QGroupBox, QDialog, QCheckBox, QPushButton, QWidget, QComboBox
+    QLabel, QLineEdit, QHBoxLayout, QVBoxLayout, QGroupBox, QDialog, QCheckBox, QPushButton, QWidget, QComboBox, \
+    QRadioButton, QButtonGroup
 from PyQt5.QtGui import QIcon
 from ECGAnalysis_v2 import ECGAnalysis, EcgData
 from numpy import loadtxt, array, argmin
@@ -18,6 +19,7 @@ from pickle import load as Pload, dump as Pdump
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
+
 
 class RespiRate(QMainWindow):
     def __init__(self):
@@ -29,6 +31,7 @@ class RespiRate(QMainWindow):
         self.loc = getcwd()  # get the location of the file.
 
         self.filtSet = FilterSettingsWindow(self)
+        self.settings = SettingsWindow(self)
 
         self.initUI()
 
@@ -73,10 +76,15 @@ class RespiRate(QMainWindow):
         openData.setStatusTip('Open saved data')
         openData.triggered.connect(self.open_serialized_data)
 
-        # Open settings window
+        # Open filter settings window
         filtSetAct = QAction('Filter Settings', self)
         filtSetAct.setStatusTip('Open filter settings dialog')
-        filtSetAct.triggered.connect(self.open_settings)
+        filtSetAct.triggered.connect(self.open_filter_settings)
+
+        # Open settings window
+        setAct = QAction('Settings', self)
+        setAct.setStatusTip('Open settings dialog')
+        setAct.triggered.connect(self.open_settings)
 
         menubar = self.menuBar()
         filemenu = menubar.addMenu('&File')
@@ -88,6 +96,7 @@ class RespiRate(QMainWindow):
         filemenu.addAction(exitAct)
 
         settingsmenu.addAction(filtSetAct)
+        settingsmenu.addAction(setAct)
 
         # toolbar actions
         # TODO change icon
@@ -138,6 +147,18 @@ class RespiRate(QMainWindow):
         self.rpkAct.setDisabled(True)
         self.rpkAct.triggered.connect(self.runRPK)
 
+        # TODO change icon
+        self.rrpAct = QAction(QIcon('next.png'), 'Extract RR Parameters', self)  # Respiratory rate params
+        self.rrpAct.setToolTip('Extract Respiratory Rate Calculation Parameters')
+        self.rrpAct.setDisabled(True)
+        self.rrpAct.triggered.connect(self.runRRP)
+
+        # TODO change icon
+        self.cntAct = QAction(QIcon('next.png'), 'Perform Count', self)  # count adv/orig
+        self.cntAct.setToolTip('Perform count method set in settings')
+        self.cntAct.setDisabled(True)
+        self.cntAct.triggered.connect(self.runCNT)
+
         # toolbar setup
         self.toolbar = self.addToolBar('Process Data')
         self.toolbar.addAction(self.elfAct)
@@ -148,6 +169,7 @@ class RespiRate(QMainWindow):
         self.toolbar.addAction(self.derAct)
         self.toolbar.addAction(self.maAct)
         self.toolbar.addAction(self.rpkAct)
+        self.toolbar.addAction(self.rrpAct)
 
         self.show()
 
@@ -191,6 +213,7 @@ class RespiRate(QMainWindow):
 
     def runDER(self):
         self.sbar.showMessage('Calculating derivative filter...')
+        self.ECG.delay = self.settings.delay  # set the correct delay based on the settings dialog
         self.ECG.DerivativeFilter()
         self.maAct.setDisabled(False)
 
@@ -202,6 +225,7 @@ class RespiRate(QMainWindow):
 
     def runMA(self):
         self.sbar.showMessage('Calculating moving average filter...')
+        self.ECG.mfl = self.filtSet.mov_len  # set the moving average length based on the filter settings dialog
         self.ECG.MovingAverageFilter()
         self.rpkAct.setDisabled(False)
 
@@ -214,10 +238,31 @@ class RespiRate(QMainWindow):
     def runRPK(self):
         self.sbar.showMessage('Detecting R-peaks...')
         self.ECG.DetectRPeaks()
+        self.rrpAct.setDisabled(False)
 
         if 'R-Peaks' not in [self.form_widget.stepChoice.itemText(i) for i in
                              range(self.form_widget.stepChoice.count())]:
             self.form_widget.stepChoice.addItem('R-Peaks')
+        if 'Heart Rate (2-point)' not in [self.form_widget.stepChoice.itemText(i) for i in
+                                          range(self.form_widget.stepChoice.count())]:
+            self.form_widget.stepChoice.addItem('Heart Rate (2-point)')
+
+        self.sbar.clearMessage()
+
+    def runRRP(self):
+        self.sbar.showMessage('Extracting Respiratory Rate Parameters...')
+        self.ECG.RespRateExtraction()
+        self.cntAct.setDisabled(False)
+
+        self.sbar.clearMessage()
+
+    def runCNT(self):
+        if self.settings.count:
+            self.sbar.showMessage('Performing Count Advanced method...')
+            self.ECG.CountAdv()
+        else:
+            self.sbar.showMessage('Performing Count Original method...')
+            self.ECG.CountOriginal()
 
         self.sbar.clearMessage()
 
@@ -347,8 +392,11 @@ class RespiRate(QMainWindow):
 
         self.sbar.clearMessage()  # clear the status bar message when done importing
 
-    def open_settings(self):
+    def open_filter_settings(self):
         self.filtSet.show()
+
+    def open_settings(self):
+        self.settings.show()
 
 
 class FormWidget(QWidget):
@@ -399,6 +447,12 @@ class FormWidget(QWidget):
             self.axes.plot(self.parent.ECG.r_pks[event][:, 0], self.parent.ECG.r_pks[event][:, 1], 'ko')
             self.axes.set_ylabel('Voltage (mV)')
             self.axes.set_xlabel('Time [s]')
+        elif step == 'Heart Rate (2-point)':
+            x = self.parent.ECG.r_pks[event][1:, 0] - self.parent.ECG.r_pks[event][0, 0]
+            y = 60/(self.parent.ECG.r_pks[event][1:, 0] - self.parent.ECG.r_pks[event][:-1, 0])
+            self.axes.plot(x, y)
+            self.axes.set_ylabel('2 point Instantaneous Heart Rate [BPM]')
+            self.axes.set_xlabel('Time [s]')
         elif step == 'Filtered':
             self.axes.plot(self.parent.ECG.t[event], self.parent.ECG.v[event])
             self.axes.set_ylabel('Voltage (mV)')
@@ -413,6 +467,140 @@ class FormWidget(QWidget):
             self.axes.set_xlabel('Time [s]')
 
         self.canvas.draw()
+
+
+class SettingsWindow(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+        # set defaults
+        self.del_def = 175  # search delay for R-peak detection in milliseconds
+        self.count_def = True  # true == count advanced, false == count original
+        self.fuse_def = True  # perform fusion, defaults to True
+        self.fuse_time_def = True  # use timings from respiratory rate parameter extraction
+
+        self.setDefaults()
+
+        self.initUI()
+
+    def initUI(self):
+        self.setGeometry(400, 400, 250, 150)
+        self.setWindowTitle('Settings')
+
+        del_gb, self.del_w = self.createRPeakOptions()  # delay options
+
+        cnt_gb, self.cnt_w = self.createCountOptions()  # count method options
+
+        fus_gb, self.fus_w = self.createFuseOptions()  # create smart fusion options
+
+        resetDefaults = QPushButton('Reset Defaults', self)
+        resetDefaults.setAutoDefault(False)
+        resetDefaults.clicked.connect(lambda: self.setDefaults(clicked=True))
+
+        windowLayout = QVBoxLayout()
+        windowLayout.addWidget(del_gb)
+        windowLayout.addWidget(cnt_gb)
+        windowLayout.addWidget(fus_gb)
+        windowLayout.addWidget(resetDefaults)
+        self.setLayout(windowLayout)
+
+    def setDefaults(self, clicked=False):
+        if not clicked:
+            self.delay = self.del_def
+            self.count = self.count_def
+            self.fuse = self.fuse_def
+            self.fuse_time = self.fuse_time_def
+        else:
+            self.del_w.setText(str(self.del_def))
+            self.cnt_w[0].setChecked(self.count_def)
+            self.fus_w[0].setChecked(self.fuse_def)
+            self.fus_w[1].setChecked(self.fuse_time_def)
+
+    def createRPeakOptions(self):
+        vGroupBox = QGroupBox('R-Peak Detection')
+        layout = QVBoxLayout()
+
+        line1 = QHBoxLayout()
+        label1 = QLabel('Search Delay (ms):', self)
+        label1.setToolTip('Delay in which if a descending half-peak is not found, declare that it is.')
+        txtbox1 = QLineEdit(self)
+        txtbox1.setText(str(self.delay))
+        txtbox1.textChanged.connect(lambda text: self.changeIntVals(text, 'delay'))
+
+        line1.addWidget(label1)
+        line1.addWidget(txtbox1)
+
+        layout.addLayout(line1)
+
+        vGroupBox.setLayout(layout)
+
+        return vGroupBox, txtbox1
+
+    def createCountOptions(self):
+        vGroupBox = QGroupBox('Count Methods')
+        layout = QVBoxLayout()
+
+        adv = QRadioButton('Count Advanced', self)
+        adv.setToolTip('Use Count Advanced method to determine breaths')
+        adv.toggled.connect(lambda: setattr(self, 'count', True))
+        orig = QRadioButton('Count Original', self)
+        orig.setToolTip('Use Count Original method to determine breaths')
+        orig.toggled.connect(lambda: setattr(self, 'count', False))
+
+        if self.count:
+            adv.setChecked(True)
+        else:
+            orig.setChecked(True)
+
+        layout.addWidget(orig)
+        layout.addWidget(adv)
+
+        vGroupBox.setLayout(layout)
+
+        return vGroupBox, [adv, orig]
+
+    def createFuseOptions(self):
+        vGroupBox = QGroupBox('Respiratory Rate Fusion Options')
+        layout = QVBoxLayout()
+
+        timing = QCheckBox('Use RR timing', self)
+        timing.setToolTip('Use Respiratory Rate parameter determined timings.  If not checked, will use 0.2s '
+                          'intervals extracted from spline interpolation')
+        timing.setDisabled(not self.fuse)
+        timing.setChecked(self.fuse_time)
+        timing.stateChanged.connect(self.changeTimeVals)
+
+        fuse = QCheckBox('Fuse RR estimates', self)
+        fuse.setToolTip('Fuse FM, AM, and BW Respiratory Rate estimates together')
+        fuse.setChecked(self.fuse)
+        fuse.stateChanged.connect(lambda state: self.changeFuseVals(state, timing))
+
+        layout.addWidget(fuse)
+        layout.addWidget(timing)
+
+        vGroupBox.setLayout(layout)
+
+        return vGroupBox, [fuse, timing]
+
+    def changeIntVals(self, text, var_name):
+        try:
+            self.__dict__[var_name] = int(text)
+        except ValueError:
+            pass
+
+    def changeFuseVals(self, cboxval, time_box):
+        if cboxval == 0:
+            self.fuse = False
+            time_box.setDisabled(True)
+        else:
+            self.fuse = True
+            time_box.setDisabled(False)
+
+    def changeTimeVals(self, val):
+        if val == 0:
+            self.fuse_time = False
+        else:
+            self.fuse_time = True
 
 
 class FilterSettingsWindow(QDialog):
@@ -462,6 +650,7 @@ class FilterSettingsWindow(QDialog):
         maf_gb.setLayout(mafLayout)
 
         resetDefaults = QPushButton('Reset Defaults', self)
+        resetDefaults.setAutoDefault(False)
         resetDefaults.clicked.connect(lambda: self.setDefaults(clicked=True))
 
         windowLayout = QVBoxLayout()
@@ -474,7 +663,7 @@ class FilterSettingsWindow(QDialog):
         self.setLayout(windowLayout)
 
     def setDefaults(self, clicked=False):
-        if clicked == False:
+        if not clicked:
             self.mov_len = self.mov_len_def
             self.elf_cut = self.elf_cut_def
             self.elf_N = self.elf_N_def
@@ -560,9 +749,11 @@ class FilterSettingsWindow(QDialog):
         else:
             self.__dict__[name] = True
 
+
 # below code allows exceptions to be reported for debugging the program
 # Back up the reference to the exceptionhook
 sys._excepthook = sys.excepthook
+
 
 def my_exception_hook(exctype, value, traceback):
     # Print the error and traceback

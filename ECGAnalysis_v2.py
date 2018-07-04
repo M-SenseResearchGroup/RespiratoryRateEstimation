@@ -261,8 +261,8 @@ class ECGAnalysis(object):
         if debug:
             self.v_old = self.v.copy()
 
-        w_cut = cutoff/self.nyq #define cutoff frequency as % of nyq. freq.
-        b, a = signal.butter(N, w_cut, 'highpass') #setup high pass filter
+        w_cut = cutoff/self.nyq  # define cutoff frequency as % of nyq. freq.
+        b, a = signal.butter(N, w_cut, 'highpass')  # setup high pass filter
 
         for key in self.vd:
             self.v[key] = signal.filtfilt(b, a, self.v[key])
@@ -280,7 +280,7 @@ class ECGAnalysis(object):
                 pl.tight_layout()
 
         try:
-            self.v_old = None #remove from memory
+            self.v_old = None  # remove from memory
         except:
             pass
 
@@ -299,12 +299,12 @@ class ECGAnalysis(object):
         self.v_der = dict()
         self.t_der = dict()
         self.v_sq = dict()
-        self.dt = 1/self.fs #timestep
+        self.dt = 1/self.fs  # timestep
 
         for key in self.vd:
             self.v_der[key] = (-self.v[key][:-4]-2*self.v[key][1:-3]+2*self.v[key][3:-1]+self.v[key][4:])/(8*self.dt)
             self.t_der[key] = self.t[key][2:-2]*1
-            self.t_der[key][:2] = 0  # timsteps are cut by 2 on either end
+            self.t_der[key][:2] = 0  # timesteps are cut by 2 on either end
 
         self.v_der[key] = np.insert(self.v_der[key],0,[0]*2)
 
@@ -373,16 +373,16 @@ class ECGAnalysis(object):
         self.q_trs = dict()  # allocate dictionary for Q-troughs (for resp rate paramters)
 
         for key in self.vd:
-            #peak indices in region with width equal to moving average width
+            # peak indices in region with width equal to moving average width
             va_pts = signal.argrelmax(self.v_ma[key], order=int(round(0.5*self.mfl_n)))[0]
-            #remove any points that are less than 0.1% of the mean of the peaks
+            # remove any points that are less than 0.1% of the mean of the peaks
             va_pts = va_pts[np.where(self.v_ma[key][va_pts] > 0.001*np.mean(self.v_ma[key][va_pts]))[0]]
-            #descending half-peak value allocation
+            # descending half-peak value allocation
             hpt = np.zeros_like(va_pts)
-            #maximum values and indices for filtered data
+            # maximum values and indices for filtered data
             vf_pks = np.zeros((len(va_pts),2))
 
-            #maximum slopes and indices for each peak
+            # maximum slopes and indices for each peak
             m_pos = np.zeros((len(va_pts),2))
 
             for i in range(len(va_pts)):
@@ -694,17 +694,17 @@ class ECGAnalysis(object):
         if 'r_pks' not in self.__dict__.keys():
             raise OrderError("Plotting Heart Rate must be done after detecting R-peaks.")
         else:
-            f, ax = pl.subplots(figsize=(16,6))
+            f, ax = pl.subplots(figsize=(16, 6))
 
             for i in self.vd:
-                ax.plot(self.r_pks[i][1:,0]-self.r_pks[i][0,0], 60/(self.r_pks[i][1:,0]-self.r_pks[i][:-1,0]), label=f'{i}')
+                ax.plot(self.r_pks[i][1:, 0]-self.r_pks[i][0, 0], 60/(self.r_pks[i][1:, 0]-self.r_pks[i][:-1, 0]),
+                        label=f'{i}')
 
                 ax.legend(title='Activity')
                 ax.set_ylabel('Heart Rate [BPM]')
                 ax.set_xlabel('Time [s]')
 
                 f.tight_layout()
-
 
     def RespRateExtraction(self):
         """
@@ -720,17 +720,17 @@ class ECGAnalysis(object):
             # allocate array.  FM is cut 1 short due to difference
             # so exclude first of other parameters as well
             self.rr_p[key] = np.zeros((len(self.r_pks[key])-1, 4))
-            self.rr_p[key][:,0] = self.r_pks[key][1:,0]  # set timings
+            self.rr_p[key][:, 0] = self.r_pks[key][1:, 0]  # set timings
             # timings assumed to be at the R-peak (second R-peak for difference)
 
             # FM: Charleton X_b3 - dt between successive R-peaks
-            self.rr_p[key][:,1] = self.r_pks[key][1:,0]-self.r_pks[key][:-1,0]
+            self.rr_p[key][:, 1] = self.r_pks[key][1:, 0]-self.r_pks[key][:-1, 0]
 
             # AM: Charleton X_b2 - amplitude difference between Q-trough and R-peak
-            self.rr_p[key][:,2] = self.r_pks[key][1:,1]-self.q_trs[key][1:,1]
+            self.rr_p[key][:, 2] = self.r_pks[key][1:, 1]-self.q_trs[key][1:, 1]
 
             # BW: Charleton X_b1 - mean of R-peak and Q-trough values
-            self.rr_p[key][:,3] = np.mean([self.r_pks[key][1:,1],self.q_trs[key][1:,1]], axis=0)
+            self.rr_p[key][:, 3] = np.mean([self.r_pks[key][1:, 1], self.q_trs[key][1:, 1]], axis=0)
 
             # create spline data points
             self.rr_spl[key] = self._SplineCreation(self.rr_p[key], dt=0.2)
@@ -744,16 +744,16 @@ class ECGAnalysis(object):
         """
         self.rr = dict()
         for key in self.vd:
-            self.rr[key] = dict()  # another dictionary to store obtained RR times since
-                                   # they will be different lengths for different parameters
+            self.rr[key] = dict()  # another dictionary to store obtained RR times since they will be different lengths
+            # for different parameters
 
-            rr_splf = np.zeros((len(self.rr_spl[key][:,1]), 3))  # spline filtered allocation
+            rr_splf = np.zeros((len(self.rr_spl[key][:, 1]), 3))  # spline filtered allocation
             # step 1 - bandpass filter with pass region between 0.1-0.5Hz
-            fs = 1/(self.rr_spl[key][1,0]-self.rr_spl[key][0,0])  # spline data frequency
+            fs = 1/(self.rr_spl[key][1, 0]-self.rr_spl[key][0, 0])  # spline data frequency
             wl = 0.1/(0.5*fs)  # low cutoff frequency as % of nyquist frequency
             wh = 0.5/(0.5*fs)  # high cutoff freq as % of nyquist freq
 
-            b, a = signal.butter(5, [wl,wh], 'bandpass')  # filtfilt, -> order is 2x given
+            b, a = signal.butter(5, [wl, wh], 'bandpass')  # filtfilt, -> order is 2x given
 
             # remove mean from data and filter
             mn = np.mean(self.rr_spl[key][:,1:], axis=0)
@@ -831,7 +831,7 @@ class ECGAnalysis(object):
             wl = 0.1/(0.5*fs)  # low cutoff frequency as % of nyquist frequency
             wh = 0.5/(0.5*fs)  # high cutoff freq as % of nyquist freq
 
-            b, a = signal.butter(5, [wl,wh], 'bandpass')  # filtfilt, -> order is 2x given
+            b, a = signal.butter(5, [wl, wh], 'bandpass')  # filtfilt, -> order is 2x given
 
             rr_splf = np.zeros_like(self.rr_spl[key][:,1:])
             mn = np.mean(self.rr_spl[key][:,1:], axis=0)
@@ -913,8 +913,7 @@ class ECGAnalysis(object):
         Parameters
         ---------
         use_given_time : bool
-        Use timings from parameter resp. rate estimates (True) or use 0.2s
-        interpolation (False).  Defaults to True.
+            Use timings from parameter resp. rate estimates (True) or use 0.2s interpolation (False).  Defaults to True.
         plot : bool
         Plot resulting fused respiratory rate estimates
         """
