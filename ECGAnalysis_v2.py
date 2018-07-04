@@ -754,28 +754,28 @@ class ECGAnalysis(object):
             b, a = signal.butter(5, [wl, wh], 'bandpass')  # filtfilt, -> order is 2x given
 
             # remove mean from data and filter
-            mn = np.mean(self.rr_spl[key][:,1:], axis=0)
-            rr_splf[:,0] = signal.filtfilt(b, a, self.rr_spl[key][:,1]-mn[0])
-            rr_splf[:,1] = signal.filtfilt(b, a, self.rr_spl[key][:,2]-mn[1])
-            rr_splf[:,2] = signal.filtfilt(b, a, self.rr_spl[key][:,3]-mn[2])
+            mn = np.mean(self.rr_spl[key][:, 1:], axis=0)
+            rr_splf[:,0] = signal.filtfilt(b, a, self.rr_spl[key][:, 1]-mn[0])
+            rr_splf[:,1] = signal.filtfilt(b, a, self.rr_spl[key][:, 2]-mn[1])
+            rr_splf[:,2] = signal.filtfilt(b, a, self.rr_spl[key][:, 3]-mn[2])
 
             if debug:
-                f, ax = pl.subplots(3,figsize=(16,5),sharex=True)
-                ax[0].plot(self.rr_spl[key][:,0],self.rr_spl[key][:,1],'k--',alpha=0.5,label='initial')
-                ax[1].plot(self.rr_spl[key][:,0],self.rr_spl[key][:,2],'k--',alpha=0.5,label='initial')
-                ax[2].plot(self.rr_spl[key][:,0],self.rr_spl[key][:,3],'k--',alpha=0.5,label='initial')
+                f, ax = pl.subplots(3,figsize=(16, 5), sharex=True)
+                ax[0].plot(self.rr_spl[key][:, 0], self.rr_spl[key][:, 1], 'k--', alpha=0.5, label='initial')
+                ax[1].plot(self.rr_spl[key][:, 0], self.rr_spl[key][:, 2], 'k--', alpha=0.5, label='initial')
+                ax[2].plot(self.rr_spl[key][:, 0], self.rr_spl[key][:, 3], 'k--', alpha=0.5, label='initial')
 
-                ax[0].plot(self.rr_spl[key][:,0],rr_splf[:,0],'b',label='filtered')
-                ax[1].plot(self.rr_spl[key][:,0],rr_splf[:,1],'b',label='filtered')
-                ax[2].plot(self.rr_spl[key][:,0],rr_splf[:,2],'b',label='filtered')
+                ax[0].plot(self.rr_spl[key][:, 0], rr_splf[:, 0], 'b', label='filtered')
+                ax[1].plot(self.rr_spl[key][:, 0], rr_splf[:, 1], 'b', label='filtered')
+                ax[2].plot(self.rr_spl[key][:, 0], rr_splf[:, 2], 'b', label='filtered')
 
-            for i, param in zip(range(3),['fm','am','bw']):
+            for i, param in zip(range(3), ['fm', 'am', 'bw']):
                 # step 2 - find local minima and maxima of filtered data
                 # get 3rd quartile, threshold is Q3*0.2
-                minpt = signal.argrelmin(rr_splf[:,i])[0]
-                maxpt = signal.argrelmax(rr_splf[:,i])[0]
+                minpt = signal.argrelmin(rr_splf[:, i])[0]
+                maxpt = signal.argrelmax(rr_splf[:, i])[0]
 
-                q3 = np.percentile(rr_splf[maxpt,i], 75)  # 3rd quartile (75th percentile)
+                q3 = np.percentile(rr_splf[maxpt, i], 75)  # 3rd quartile (75th percentile)
                 thr = 0.2*q3  # threshold
 
                 # step 3 - valid breath cycle is max>thr, min<0, max>thr with no max/min in between
@@ -791,18 +791,19 @@ class ECGAnalysis(object):
                     # if goes from local max to local min to local max
                     if etp[j]==True and etp[j+2]==True and etp[j+1]==False:
                         # if the maximums are above the threshold and minimum below 0
-                        if rr_splf[ext[j],i]>thr and rr_splf[ext[j+2],i]>thr and rr_splf[ext[j+1],i]<0:
-                            brth_cyc.append([ext[j],ext[j+2]])
+                        if rr_splf[ext[j], i] > thr and rr_splf[ext[j+2], i] > thr and rr_splf[ext[j+1], i] < 0:
+                            brth_cyc.append([ext[j], ext[j+2]])
                             # append time and breathing frequency
-                            rr.append([self.rr_spl[key][ext[j+1],0],1/(self.rr_spl[key][ext[j+2],0]-self.rr_spl[key][ext[j],0])])
+                            rr.append([self.rr_spl[key][ext[j+1], 0], 1/(self.rr_spl[key][ext[j+2], 0]-
+                                                                         self.rr_spl[key][ext[j], 0])])
                 self.rr[key][param] = np.array(rr)
 
                 if debug:
-                    ax[i].plot(self.rr_spl[key][minpt,0], rr_splf[minpt,i], '*')
-                    ax[i].plot(self.rr_spl[key][maxpt,0], rr_splf[maxpt,i], 'o')
+                    ax[i].plot(self.rr_spl[key][minpt, 0], rr_splf[minpt, i], '*')
+                    ax[i].plot(self.rr_spl[key][maxpt, 0], rr_splf[maxpt, i], 'o')
                     ax[i].axhline(thr)
                     for st, sp in brth_cyc:
-                        ax[i].plot(self.rr_spl[key][st:sp,0], rr_splf[st:sp,i], 'r', linewidth=2, alpha=0.5)
+                        ax[i].plot(self.rr_spl[key][st:sp,0], rr_splf[st:sp, i], 'r', linewidth=2, alpha=0.5)
 
                         ax[i].legend(title=f'Paramter: {param}')
                         ax[i].set_ylabel('R-R peak times [s]')
