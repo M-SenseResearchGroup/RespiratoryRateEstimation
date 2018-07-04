@@ -159,6 +159,12 @@ class RespiRate(QMainWindow):
         self.cntAct.setDisabled(True)
         self.cntAct.triggered.connect(self.runCNT)
 
+        # TODO change icon
+        self.fusAct = QAction(QIcon('next.png'), 'Fuse Estimates', self)
+        self.fusAct.setToolTip('Fuse Respiratory Rate estimates')
+        self.fusAct.setDisabled(True)
+        self.fusAct.triggered.connect(self.runFUS)
+
         # toolbar setup
         self.toolbar = self.addToolBar('Process Data')
         self.toolbar.addAction(self.elfAct)
@@ -170,6 +176,8 @@ class RespiRate(QMainWindow):
         self.toolbar.addAction(self.maAct)
         self.toolbar.addAction(self.rpkAct)
         self.toolbar.addAction(self.rrpAct)
+        self.toolbar.addAction(self.cntAct)
+        self.toolbar.addAction(self.fusAct)
 
         self.show()
 
@@ -257,15 +265,47 @@ class RespiRate(QMainWindow):
         self.sbar.clearMessage()
 
     def runCNT(self):
+        steps = [self.form_widget.stepChoice.itemText(i) for i in range(self.form_widget.stepChoice.count())]
+        adv_steps = ['AM Respiratory Rate (Adv)', 'FM Respiratory Rate (Adv)', 'BW Respiratory Rate (Adv)']
+        orig_steps = ['AM Respiratory Rate (Orig)', 'FM Respiratory Rate (Orig)', 'BW Respiratory Rate (Orig)']
+
         if self.settings.count:
             self.sbar.showMessage('Performing Count Advanced method...')
             self.ECG.CountAdv()
+
+            for astep in adv_steps:
+                if astep not in steps:
+                    self.form_widget.stepChoice.addItem(astep)
+            for ostep in orig_steps:
+                if ostep in steps:
+                    ind = self.form_widget.stepChoice.findText(ostep)
+                    self.form_widget.stepChoice.removeItem(ind)
         else:
             self.sbar.showMessage('Performing Count Original method...')
             self.ECG.CountOriginal()
 
+            for ostep in orig_steps:
+                if ostep not in steps:
+                    self.form_widget.stepChoice.addItem(ostep)
+            for astep in adv_steps:
+                if astep in steps:
+                    ind = self.form_widget.stepChoice.findText(astep)
+                    self.form_widget.stepChoice.removeItem(ind)
+        self.fusAct.setDisabled(False)
+
         self.sbar.clearMessage()
 
+    def runFUS(self):
+        steps = [self.form_widget.stepChoice.itemText(i) for i in range(self.form_widget.stepChoice.count())]
+
+        if self.settings.fuse:
+            self.sbar.showMessage('Fusing Respiratory Rate Estimates...')
+            self.ECG.SmartModFusion(use_given_time=self.settings.fuse_time, plot=False)
+
+            if 'Fused Respiratory Rate' not in steps:
+                self.form_widget.stepChoice.addItem('Fused Respiratory Rate')
+
+        self.sbar.clearMessage()
 
     def save_data(self):
         """
@@ -442,17 +482,6 @@ class FormWidget(QWidget):
             self.axes.plot(self.parent.data.t[event], self.parent.data.v[event])
             self.axes.set_ylabel('Voltage (mV)')
             self.axes.set_xlabel('Time [s]')
-        elif step == 'R-Peaks':
-            self.axes.plot(self.parent.ECG.t[event], self.parent.ECG.v[event])
-            self.axes.plot(self.parent.ECG.r_pks[event][:, 0], self.parent.ECG.r_pks[event][:, 1], 'ko')
-            self.axes.set_ylabel('Voltage (mV)')
-            self.axes.set_xlabel('Time [s]')
-        elif step == 'Heart Rate (2-point)':
-            x = self.parent.ECG.r_pks[event][1:, 0] - self.parent.ECG.r_pks[event][0, 0]
-            y = 60/(self.parent.ECG.r_pks[event][1:, 0] - self.parent.ECG.r_pks[event][:-1, 0])
-            self.axes.plot(x, y)
-            self.axes.set_ylabel('2 point Instantaneous Heart Rate [BPM]')
-            self.axes.set_xlabel('Time [s]')
         elif step == 'Filtered':
             self.axes.plot(self.parent.ECG.t[event], self.parent.ECG.v[event])
             self.axes.set_ylabel('Voltage (mV)')
@@ -465,6 +494,35 @@ class FormWidget(QWidget):
             self.axes.plot(self.parent.ECG.t_ma[event], self.parent.ECG.v_ma[event])
             self.axes.set_ylabel('Voltage (mV)')
             self.axes.set_xlabel('Time [s]')
+        elif step == 'R-Peaks':
+            self.axes.plot(self.parent.ECG.t[event], self.parent.ECG.v[event])
+            self.axes.plot(self.parent.ECG.r_pks[event][:, 0], self.parent.ECG.r_pks[event][:, 1], 'ko')
+            self.axes.set_ylabel('Voltage (mV)')
+            self.axes.set_xlabel('Time [s]')
+        elif step == 'Heart Rate (2-point)':
+            x = self.parent.ECG.r_pks[event][1:, 0] - self.parent.ECG.r_pks[event][0, 0]
+            y = 60/(self.parent.ECG.r_pks[event][1:, 0] - self.parent.ECG.r_pks[event][:-1, 0])
+            self.axes.plot(x, y)
+            self.axes.set_ylabel('2 point Instantaneous Heart Rate [BPM]')
+            self.axes.set_xlabel('Time [s]')
+        elif 'FM Respiratory Rate' in step:
+            self.axes.plot(self.parent.ECG.rr[event]['fm'][:, 0], self.parent.ECG.rr[event]['fm'][:, 1])
+            self.axes.set_xlabel('Time [s]')
+            self.axes.set_ylabel('FM Respiratory Rate [BPM]')
+        elif 'AM Respiratory Rate' in step:
+            self.axes.plot(self.parent.ECG.rr[event]['am'][:, 0], self.parent.ECG.rr[event]['am'][:, 1])
+            self.axes.set_xlabel('Time [s]')
+            self.axes.set_ylabel('AM Respiratory Rate [BPM]')
+        elif 'BW Respiratory Rate' in step:
+            self.axes.plot(self.parent.ECG.rr[event]['bw'][:, 0], self.parent.ECG.rr[event]['bw'][:, 1])
+            self.axes.set_xlabel('Time [s]')
+            self.axes.set_ylabel('BW Respiratory Rate [BPM]')
+        elif step == 'Fused Respiratory Rate':
+            self.axes.plot(self.parent.ECG.rr_fuse[event][:, 0], self.parent.ECG.rr_fuse[event][:, 1],
+                           label='Fused Estimate')
+            self.axes.set_xlabel('Time [s]')
+            self.axes.set_ylabel('Fused Respiratory Rate [BPM]')
+            self.axes.legend()
 
         self.canvas.draw()
 

@@ -12,8 +12,6 @@ import matplotlib.patches as mpatches
 from scipy import signal, interpolate
 from os import listdir
 
-# TODO remove this when done testing
-
 
 class EcgData:
     def __init__(self):
@@ -75,15 +73,15 @@ class ECGAnalysis(object):
         self.ElimSubCardiacFreq()
         self.DerivativeFilter()
         self.MovingAverageFilter()
-        self.DetectRPeaks(debug=True)
+        self.DetectRPeaks(debug=False)
         self.PlotHeartRate()
         self.RespRateExtraction()
         if count == 'orig':
             self.CountOriginal(debug=False)
         if count == 'adv':
-            self.CountAdv(debug=False)
+            self.CountAdv(debug=True)
         if fuse:
-            self.SmartModFusion(use_given_time=False)
+            self.SmartModFusion(use_given_time=True)
 
     def ElimLowFreq(self, cutoff=3, N=1, debug=False):
         """
@@ -570,12 +568,12 @@ class ECGAnalysis(object):
                 if t[i] - t[j] > 0.36:
                     k.append(i)
                     j = i
-                    self._UpdateThresholds(a_pks[i],f_pks[i],snta,sntf,sig=True,searchback=True)
+                    self._UpdateThresholds(a_pks[i], f_pks[i], snta, sntf, sig=True,searchback=True)
                 elif t[i] - t[j] > 0.2:
                     if slp[i] > 0.5*slp[j]:
                         k.append(i)
                         j = i
-                        self._UpdateThresholds(a_pks[i],f_pks[i],snta,sntf,sig=True,searchback=True)
+                        self._UpdateThresholds(a_pks[i], f_pks[i], snta, sntf, sig=True, searchback=True)
         return k, snta, sntf
 
     @staticmethod
@@ -636,14 +634,14 @@ class ECGAnalysis(object):
         Updated threshold, signal and noise moving averages for filtered data
         """
 
-        if sig==True:
-            if searchback==False:
+        if sig:
+            if not searchback:
                 tsn_ma.s = 0.125*ma_peak + 0.875*tsn_ma.s  # update moving average signal peak value
                 tsn_f.s = 0.125*f_peak + 0.875*tsn_f.s  # update filtered signal peak value
-            elif searchback==False:
+            else:
                 tsn_ma.s = 0.25*ma_peak + 0.75*tsn_ma.s
                 tsn_f.s = 0.125*f_peak + 0.75*tsn_f.s
-        elif sig==False:
+        elif not sig:
             tsn_ma.n = 0.125*ma_peak+ 0.875*tsn_ma.n  # update moving average noise peak value
             tsn_f.n = 0.125*f_peak + 0.875*tsn_f.n  # update filtered noise peak value
 
@@ -670,20 +668,20 @@ class ECGAnalysis(object):
         M by 2 array of time and parameters, with timestep = dt
         """
 
-        cs1 = interpolate.CubicSpline(data[:,0],data[:,1])  # setup spline function
-        cs2 = interpolate.CubicSpline(data[:,0],data[:,2])  # setup 2nd spline function
-        cs3 = interpolate.CubicSpline(data[:,0],data[:,3])  # setup 3rd spline function
+        cs1 = interpolate.CubicSpline(data[:, 0], data[:, 1])  # setup spline function
+        cs2 = interpolate.CubicSpline(data[:, 0], data[:, 2])  # setup 2nd spline function
+        cs3 = interpolate.CubicSpline(data[:, 0], data[:, 3])  # setup 3rd spline function
 
-        x = np.arange(data[0,0], data[-1,0], dt)  # setup x values.  dt second intervals
+        x = np.arange(data[0, 0], data[-1, 0], dt)  # setup x values.  dt second intervals
         # if x-values don't include end time, add it to the array
-        if data[-1,0] not in x:
-            x = np.append(x, data[-1,0])
+        if data[-1, 0] not in x:
+            x = np.append(x, data[-1, 0])
 
         spl = np.zeros((len(x), 4))
-        spl[:,0] = x
-        spl[:,1] = cs1(x)
-        spl[:,2] = cs2(x)
-        spl[:,3] = cs3(x)
+        spl[:, 0] = x
+        spl[:, 1] = cs1(x)
+        spl[:, 2] = cs2(x)
+        spl[:, 3] = cs3(x)
 
         return spl
 
@@ -827,53 +825,53 @@ class ECGAnalysis(object):
             # for different parameters will possibly be different sizes
 
             # step 1 - bandpass filter with pass region between 0.1-0.5Hz
-            fs = 1/(self.rr_spl[key][1,0]-self.rr_spl[key][0,0])  # spline data frequency
+            fs = 1/(self.rr_spl[key][1, 0]-self.rr_spl[key][0, 0])  # spline data frequency
             wl = 0.1/(0.5*fs)  # low cutoff frequency as % of nyquist frequency
             wh = 0.5/(0.5*fs)  # high cutoff freq as % of nyquist freq
 
             b, a = signal.butter(5, [wl, wh], 'bandpass')  # filtfilt, -> order is 2x given
 
-            rr_splf = np.zeros_like(self.rr_spl[key][:,1:])
-            mn = np.mean(self.rr_spl[key][:,1:], axis=0)
+            rr_splf = np.zeros_like(self.rr_spl[key][:, 1:])
+            mn = np.mean(self.rr_spl[key][:, 1:], axis=0)
 
             # remove mean and apply filter to input spline data
-            rr_splf[:,0] = signal.filtfilt(b, a, self.rr_spl[key][:,1]-mn[0])
-            rr_splf[:,1] = signal.filtfilt(b, a, self.rr_spl[key][:,2]-mn[1])
-            rr_splf[:,2] = signal.filtfilt(b, a, self.rr_spl[key][:,3]-mn[2])
+            rr_splf[:, 0] = signal.filtfilt(b, a, self.rr_spl[key][:, 1]-mn[0])
+            rr_splf[:, 1] = signal.filtfilt(b, a, self.rr_spl[key][:, 2]-mn[1])
+            rr_splf[:, 2] = signal.filtfilt(b, a, self.rr_spl[key][:, 3]-mn[2])
 
             if debug:
-                f, ax = pl.subplots(3, figsize=(16,9), sharex=True)
+                f, ax = pl.subplots(3, figsize=(16, 9), sharex=True)
 
-            for i,param in zip(range(3),['fm','am','bw']):
+            for i, param in zip(range(3), ['fm', 'am', 'bw']):
                 # step 2 - find local minima and maxima of filtered data
                 # get 3rd quartile, threshold is Q3*0.2
-                minpt = signal.argrelmin(rr_splf[:,i])[0]
-                maxpt = signal.argrelmax(rr_splf[:,i])[0]
+                minpt = signal.argrelmin(rr_splf[:, i])[0]
+                maxpt = signal.argrelmax(rr_splf[:, i])[0]
 
                 # step 3 - calculate absolute value diff. between subsequent local extrema
                 # 3rd quartile of differences, threshold = 0.1*Q3
-                ext, etp = zip(*sorted(zip(np.append(maxpt,minpt), [True]*len(maxpt)+[False]*len(minpt))))
+                ext, etp = zip(*sorted(zip(np.append(maxpt, minpt), [True]*len(maxpt)+[False]*len(minpt))))
                 ext, etp = np.array(ext), np.array(etp)
 
                 ext_diff = np.zeros(len(ext)-1)
                 for j in range(len(ext)-1):
                     if etp[j] != etp[j+1]:  # ie min followed by max or max followed by min
-                        ext_diff[j] = abs(rr_splf[ext[j],i]-rr_splf[ext[j+1],i])
+                        ext_diff[j] = abs(rr_splf[ext[j], i]-rr_splf[ext[j+1], i])
 
-                thr = 0.1*np.percentile(ext_diff,75)  # threshold value
+                thr = 0.1*np.percentile(ext_diff, 75)  # threshold value
 
                 if debug:
-                    ax[i].plot(self.rr_spl[key][:,0], rr_splf[:,i])
-                    ax[i].plot(self.rr_spl[key][minpt,0], rr_splf[minpt,i], 'k+')
-                    ax[i].plot(self.rr_spl[key][maxpt,0], rr_splf[maxpt,i], 'k+')
+                    ax[i].plot(self.rr_spl[key][:, 0], rr_splf[:, i])
+                    ax[i].plot(self.rr_spl[key][minpt, 0], rr_splf[minpt, i], 'k+')
+                    ax[i].plot(self.rr_spl[key][maxpt, 0], rr_splf[maxpt, i], 'k+')
 
                 rem = 0  # removed indices counter
                 # step 4 - remove any sets whose difference is less than the threshold
                 for j in range(len(ext)-1):
                     if etp[j-rem] != etp[j-rem+1]:
-                        if abs(rr_splf[ext[j-rem],i]-rr_splf[ext[j-rem+1],i])<thr:
-                            ext = np.delete(ext, [j-rem,j-rem+1])
-                            etp = np.delete(etp, [j-rem,j-rem+1])
+                        if abs(rr_splf[ext[j-rem], i]-rr_splf[ext[j-rem+1], i]) < thr:
+                            ext = np.delete(ext, [j-rem, j-rem+1])
+                            etp = np.delete(etp, [j-rem, j-rem+1])
                             rem += 2
 
                 # step 5 - breath cycles are now minimum -> maximum -> minimum = 1 cycle
@@ -881,25 +879,26 @@ class ECGAnalysis(object):
                 brth_cyc_xnx = []  # try maX-miN-maX cycles to see if more than min-max-min
 
                 for j in range(len(ext)-2):
-                    if etp[j]==False and etp[j+1]==True and etp[j+2]==False:
-                        brth_cyc.append([ext[j],ext[j+2]])
-                    elif etp[j]==True and etp[j+1]==False and etp[j+2]==True:
-                        brth_cyc_xnx.append([ext[j],ext[j+2]])
+                    if not etp[j]and etp[j+1] and not etp[j+2]:
+                        brth_cyc.append([ext[j], ext[j+2]])
+                    elif etp[j] and not etp[j+1] and etp[j+2]:
+                        brth_cyc_xnx.append([ext[j], ext[j+2]])
 
                 self.rr[key][param] = np.zeros((max([len(brth_cyc), len(brth_cyc_xnx)]), 2))
 
-                if len(brth_cyc)<len(brth_cyc_xnx):
+                if len(brth_cyc) < len(brth_cyc_xnx):
                     brth_cyc = brth_cyc_xnx
 
-                for j in range(len(self.rr[key][param][:,0])):
-                    self.rr[key][param][j] = [(self.rr_spl[key][brth_cyc[j][1],0]+self.rr_spl[key][brth_cyc[j][0],0])/2,\
-                                              1/(self.rr_spl[key][brth_cyc[j][1],0]-self.rr_spl[key][brth_cyc[j][0],0])]
+                for j in range(len(self.rr[key][param][:, 0])):
+                    self.rr[key][param][j] = [(self.rr_spl[key][brth_cyc[j][1], 0]+self.rr_spl[key][brth_cyc[j][0], 0])
+                                              / 2, 1/(self.rr_spl[key][brth_cyc[j][1], 0] -
+                                                      self.rr_spl[key][brth_cyc[j][0], 0])]
 
                 if debug:
-                    ax[i].plot(self.rr_spl[key][ext,0], rr_splf[ext,i], 'ro', alpha=0.5, markersize=0.5)
+                    ax[i].plot(self.rr_spl[key][ext, 0], rr_splf[ext, i], 'ro', alpha=0.5, markersize=0.5)
 
                     for st, sp in brth_cyc:
-                        ax[i].plot(self.rr_spl[key][st:sp,0], rr_splf[st:sp,i], 'r', alpha=0.25, linewidth=5)
+                        ax[i].plot(self.rr_spl[key][st:sp, 0], rr_splf[st:sp, i], 'r', alpha=0.25, linewidth=5)
         if debug:
             f.tight_layout()
             f.subplots_adjust(hspace=0)
@@ -921,47 +920,47 @@ class ECGAnalysis(object):
         for key in self.vd:
             # convert to BPM
             for param in self.rr[key].keys():
-                self.rr[key][param][:,1] *= 60
+                self.rr[key][param][:, 1] *= 60
 
             # calculate spline functions
-            fmsf = interpolate.CubicSpline(self.rr[key]['fm'][:,0], self.rr[key]['fm'][:,1])
-            amsf = interpolate.CubicSpline(self.rr[key]['am'][:,0], self.rr[key]['am'][:,1])
-            bwsf = interpolate.CubicSpline(self.rr[key]['bw'][:,0], self.rr[key]['bw'][:,1])
+            fmsf = interpolate.CubicSpline(self.rr[key]['fm'][:, 0], self.rr[key]['fm'][:, 1])
+            amsf = interpolate.CubicSpline(self.rr[key]['am'][:, 0], self.rr[key]['am'][:, 1])
+            bwsf = interpolate.CubicSpline(self.rr[key]['bw'][:, 0], self.rr[key]['bw'][:, 1])
 
             if use_given_time:
-                x = np.unique(np.concatenate((self.rr[key]['fm'][:,0],self.rr[key]['am'][:,0],\
-                self.rr[key]['bw'][:,0])))
+                x = np.unique(np.concatenate((self.rr[key]['fm'][:, 0], self.rr[key]['am'][:, 0],
+                                              self.rr[key]['bw'][:, 0])))
             else:
-                tmin = max([self.rr[key]['fm'][0,0], self.rr[key]['am'][0,0], self.rr[key]['bw'][0,0]])
-                tmax = min([self.rr[key]['fm'][-1,0], self.rr[key]['am'][-1,0], self.rr[key]['bw'][-1,0]])
+                tmin = max([self.rr[key]['fm'][0, 0], self.rr[key]['am'][0, 0], self.rr[key]['bw'][0, 0]])
+                tmax = min([self.rr[key]['fm'][-1, 0], self.rr[key]['am'][-1, 0], self.rr[key]['bw'][-1, 0]])
                 x = np.arange(tmin, tmax, 0.2)
-            lqi = np.array([False]*len(x))  # Low Quality Index
+            self.lqi = np.array([False]*len(x))  # Low Quality Index
 
             fms = fmsf(x)
             ams = amsf(x)
             bws = bwsf(x)
 
-            st_dev = np.std(np.array([bws,ams,fms]), axis=0)
-            rr = np.mean(np.array([bws,ams,fms]), axis=0)
+            self.st_dev = np.std(np.array([bws, ams, fms]), axis=0)
+            rr = np.mean(np.array([bws, ams, fms]), axis=0)
 
-            for i in range(len(st_dev)):
-                if st_dev[i]>4:
-                    lqi[i] = True  # if Standard Dev > 4 BPM Low Quality Index
+            for i in range(len(self.st_dev)):
+                if self.st_dev[i] > 4:
+                    self.lqi[i] = True  # if Standard Dev > 4 BPM Low Quality Index
 
-            self.rr_fuse[key] = np.zeros((len(rr),2))
-            self.rr_fuse[key][:,1] = rr
-            self.rr_fuse[key][:,0] = x
+            self.rr_fuse[key] = np.zeros((len(rr), 2))
+            self.rr_fuse[key][:, 1] = rr
+            self.rr_fuse[key][:, 0] = x
 
             if plot:
-                f, ax = pl.subplots(figsize=(16,5))
-                line1, = ax.plot(self.rr_fuse[key][:,0], self.rr_fuse[key][:,1], label='Fused Est.')
+                f, ax = pl.subplots(figsize=(16, 5))
+                line1, = ax.plot(self.rr_fuse[key][:, 0], self.rr_fuse[key][:, 1], label='Fused Est.')
 
-                ind = np.argwhere(lqi[1:]!=lqi[:-1]).flatten() + 1
-                ind = np.append(ind, len(lqi))
+                ind = np.argwhere(self.lqi[1:] != self.lqi[:-1]).flatten() + 1
+                ind = np.append(ind, len(self.lqi))
                 ind = np.insert(ind, 0, 0)
                 for i1, i2 in zip(ind[:-1], ind[1:]+1):
-                    ax.fill_between(x[i1:i2],rr[i1:i2]-st_dev[i1:i2],rr[i1:i2]+st_dev[i1:i2], alpha=0.5, \
-                                    color='red' if lqi[i1] else 'blue')
+                    ax.fill_between(x[i1:i2], rr[i1:i2]-self.st_dev[i1:i2], rr[i1:i2]+self.st_dev[i1:i2], alpha=0.5,
+                                    color='red' if self.lqi[i1] else 'blue')
                 ax.set_title(f'{key}')
 
                 b_p = mpatches.Patch(color='blue', alpha=0.5, label='St. Dev. < 4 BPM')
@@ -972,6 +971,8 @@ class ECGAnalysis(object):
 # fprefix = 'C:\\Users\\Lukas Adamowicz\\Dropbox\\Masters\\Project\\RespiratoryRate_HeartRate\\Python RRest\\'
 #
 # fprefix_val = 'C:\\Users\\Lukas Adamowicz\\Dropbox\\Masters\\Project\\RespiratoryRate_HeartRate\\' + \
+#               'RespiratoryRateEstimation\\Validation_Data\\RespRate_PPG_Phone\\'
+# fprefix_val = 'C:\\Users\\Lukas Adamowicz\\Dropbox\\Masters\\Project - Bike Study\\RespiratoryRate_HeartRate\\' \
 #               'RespiratoryRateEstimation\\Validation_Data\\RespRate_PPG_Phone\\'
 #
 # subj_ids = listdir(fprefix_val)
@@ -1004,11 +1005,11 @@ class ECGAnalysis(object):
 #
 #     data[s].t['After Exercise'] = t[aib:aie]
 #     data[s].v['After Exercise'] = v[aib:aie]
-
-# data.t['middle'],data.v['middle'] = np.genfromtxt(fprefix+'middle_ecg.csv', skip_header=0, unpack=True, delimiter=',')
-
-# data.t['back'], data.v['back'] = np.genfromtxt(fprefix+'back_ecg.csv', skip_header=0, unpack=True, delimiter=',')
-
-# data.t['forward'], data.v['forward'] = np.genfromtxt(fprefix+'forward_ecg.csv', skip_header=0, unpack=True, delimiter=',')
-
+#
+# # data.t['middle'],data.v['middle'] = np.genfromtxt(fprefix+'middle_ecg.csv', skip_header=0, unpack=True, delimiter=',')
+# #
+# # data.t['back'], data.v['back'] = np.genfromtxt(fprefix+'back_ecg.csv', skip_header=0, unpack=True, delimiter=',')
+# #
+# # data.t['forward'], data.v['forward'] = np.genfromtxt(fprefix+'forward_ecg.csv', skip_header=0, unpack=True, delimiter=',')
+#
 # test = ECGAnalysis(data['KJ'])
