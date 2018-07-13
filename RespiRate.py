@@ -11,8 +11,9 @@ import sys
 from os import getcwd
 from PyQt5.QtWidgets import QMainWindow, QApplication, QFileDialog, QAction, qApp, QMessageBox, QMenu, \
     QLabel, QLineEdit, QHBoxLayout, QVBoxLayout, QGroupBox, QDialog, QCheckBox, QPushButton, QWidget, QComboBox, \
-    QRadioButton
+    QRadioButton, QTableWidget, QTableWidgetItem, QTabWidget
 from PyQt5.QtGui import QIcon
+from PyQt5.QtCore import pyqtSlot
 from ECGAnalysis_v2 import ECGAnalysis, EcgData
 from numpy import loadtxt, array, argmin, argwhere, append, insert
 from pickle import load as Pload, dump as Pdump
@@ -34,6 +35,7 @@ class RespiRate(QMainWindow):
 
         self.filtSet = FilterSettingsWindow(self)
         self.settings = SettingsWindow(self)
+        self.rpkTab = TableWindow(self)
 
         self.initUI()
 
@@ -88,15 +90,24 @@ class RespiRate(QMainWindow):
         setAct.setStatusTip('Open settings dialog')
         setAct.triggered.connect(self.open_settings)
 
+        # Open HR table window
+        self.rpkTabAct = QAction(QIcon('Icons\\next.png'), 'R-Peak Table', self)
+        self.rpkTabAct.setStatusTip('View R-Peak times')
+        self.rpkTabAct.setDisabled(True)
+        self.rpkTabAct.triggered.connect(self.open_rpkTab)
+
         menubar = self.menuBar()
         filemenu = menubar.addMenu('&File')
         runmenu = menubar.addMenu('&Analysis')
+        datamenu = menubar.addMenu('&Data')
         settingsmenu = menubar.addMenu('&Settings')
 
         filemenu.addMenu(importMenu)
         filemenu.addAction(openData)
         filemenu.addAction(self.saveData)
         filemenu.addAction(exitAct)
+
+        datamenu.addAction(self.rpkTabAct)
 
         settingsmenu.addAction(filtSetAct)
         settingsmenu.addAction(setAct)
@@ -285,6 +296,7 @@ class RespiRate(QMainWindow):
         self.sbar.showMessage('Detecting R-peaks...')
         self.ECG.DetectRPeaks()
         self.rrpAct.setDisabled(False)
+        self.rpkTabAct.setDisabled(False)
 
         if 'R-Peaks' not in [self.form_widget.stepChoice.itemText(i) for i in
                              range(self.form_widget.stepChoice.count())]:
@@ -485,6 +497,10 @@ class RespiRate(QMainWindow):
 
     def open_settings(self):
         self.settings.show()
+
+    def open_rpkTab(self):
+        self.rpkTab.populateFromDict(self.ECG.r_pks)
+        self.rpkTab.show()
 
 
 class FormWidget(QWidget):
@@ -945,6 +961,67 @@ class FilterSettingsWindow(QDialog):
             self.__dict__[name] = False
         else:
             self.__dict__[name] = True
+
+
+class TableWindow(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+        self.initUI()
+
+    def initUI(self):
+        self.setWindowTitle('R-Peaks')
+        self.setGeometry(300, 400, 300, 500)
+
+        self.tab = QTabWidget()
+
+        self.layout = QVBoxLayout(self)
+        self.layout.addWidget(self.tab)
+        self.setLayout(self.layout)
+
+    def populateFromDict(self, data):
+        self.tabs = []  # append tabs to this list
+        self.tables = []  # append tables to this list
+        self.tab.clear()  # clear any old data/widgets
+
+        for ev in data.keys():
+            self.tabs.append(QWidget())  # create a tab for the event
+            self.tab.addTab(self.tabs[-1], ev)  # add the tab to the tab widget with the event name
+
+            self.tabs[-1].layout = QVBoxLayout()  # create the layout for the tab
+
+            m, _ = data[ev].shape  # get number of rows
+
+            self.tables.append(self.createTable(m, 2))  # create and append the m-by-2 table for time and voltage
+            self.tables[-1].setHorizontalHeaderLabels('Time;Voltage [mv]'.split(';'))  # set appropriate headers
+
+            # set the data in the table
+            for i in range(m):
+                self.tables[-1].setItem(i, 0, QTableWidgetItem(str(data[ev][i, 0])))
+                self.tables[-1].setItem(i, 1, QTableWidgetItem(str(data[ev][i, 1])))
+
+            self.tables[-1].move(0, 0)
+            self.tabs[-1].layout.addWidget(self.tables[-1])
+            self.tabs[-1].setLayout(self.tabs[-1].layout)
+
+        # TODO add export button and function for R-peak data
+
+    def createTable(self, m, n):
+        table = QTableWidget()
+        table.setRowCount(m)
+        table.setColumnCount(n)
+
+        # self.table.setItem(0,0, QTableWidgetItem("Cell (1,1)"))
+
+        # table selection change
+        table.doubleClicked.connect(self.on_dclick)
+
+        return table
+
+    @pyqtSlot()
+    def on_dclick(self):
+        # do stuff
+        pass
 
 
 # below code allows exceptions to be reported for debugging the program
