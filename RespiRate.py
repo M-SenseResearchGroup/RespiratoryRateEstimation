@@ -12,8 +12,8 @@ from os import getcwd
 from PyQt5.QtWidgets import QMainWindow, QApplication, QFileDialog, QAction, qApp, QMessageBox, QMenu, \
     QLabel, QLineEdit, QHBoxLayout, QVBoxLayout, QGroupBox, QDialog, QCheckBox, QPushButton, QWidget, QComboBox, \
     QRadioButton, QTableWidget, QTableWidgetItem, QTabWidget
-from PyQt5.QtGui import QIcon
-from PyQt5.QtCore import pyqtSlot
+from PyQt5.QtGui import QIcon, QFont
+from PyQt5.QtCore import pyqtSlot, Qt
 from ECGAnalysis_v2 import ECGAnalysis, EcgData
 from numpy import loadtxt, array, argmin, argwhere, append, insert
 from pickle import load as Pload, dump as Pdump
@@ -30,6 +30,8 @@ class RespiRate(QMainWindow):
         self.sbar = self.statusBar()  # new shorthand for status bar
         self.annots = None  # allocate for annotations to allow for checking later on
         self.count_run = False  # set that the count method has not been run.  used for fusion run toggle with settings
+
+        self.boldFont = QFont('FontFamily', weight=75)  # create option for bold font
 
         self.loc = getcwd()  # get the location of the file.
 
@@ -304,6 +306,8 @@ class RespiRate(QMainWindow):
         if 'Heart Rate (2-point)' not in [self.form_widget.stepChoice.itemText(i) for i in
                                           range(self.form_widget.stepChoice.count())]:
             self.form_widget.stepChoice.addItem('Heart Rate (2-point)')
+        ind = self.form_widget.stepChoice.findText('Heart Rate (2-point)')
+        self.form_widget.stepChoice.setItemData(ind, self.boldFont, Qt.FontRole)
 
         self.sbar.clearMessage()
 
@@ -362,6 +366,8 @@ class RespiRate(QMainWindow):
 
             if 'Fused Respiratory Rate' not in steps:
                 self.form_widget.stepChoice.addItem('Fused Respiratory Rate')
+            ind = self.form_widget.stepChoice.findText('Fused Respiratory Rate')
+            self.form_widget.stepChoice.setItemData(ind, self.boldFont, Qt.FontRole)
 
         self.sbar.clearMessage()
 
@@ -404,6 +410,8 @@ class RespiRate(QMainWindow):
             self.form_widget.plotButton.setDisabled(False)
 
             self.form_widget.stepChoice.addItem('Raw Data')
+            ind = self.form_widget.stepChoice.findText('Raw Data')
+            self.form_widget.stepChoice.setItemData(ind, self.boldFont, Qt.FontRole)
 
             for ev in self.data.t.keys():
                 self.form_widget.eventChoice.addItem(ev)
@@ -484,6 +492,9 @@ class RespiRate(QMainWindow):
             if 'Raw Data' not in [self.form_widget.stepChoice.itemText(i) for i in
                                   range(self.form_widget.stepChoice.count())]:
                 self.form_widget.stepChoice.addItem('Raw Data')
+
+            ind = self.form_widget.stepChoice.findText('Raw Data')
+            self.form_widget.stepChoice.setItemData(ind, self.boldFont, Qt.FontRole)
 
             for ev in self.data.t.keys():
                 if ev not in [self.form_widget.eventChoice.itemText(i) for i in
