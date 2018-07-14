@@ -15,7 +15,7 @@ from PyQt5.QtWidgets import QMainWindow, QApplication, QFileDialog, QAction, qAp
 from PyQt5.QtGui import QIcon, QFont
 from PyQt5.QtCore import pyqtSlot, Qt
 from ECGAnalysis_v2 import ECGAnalysis, EcgData
-from numpy import loadtxt, array, argmin, argwhere, append, insert
+from numpy import loadtxt, array, argmin, argwhere, append, insert, savetxt
 from pickle import load as Pload, dump as Pdump
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
@@ -995,6 +995,8 @@ class TableWindow(QDialog):
         self.tables = []  # append tables to this list
         self.tab.clear()  # clear any old data/widgets
 
+        eButtons = []  # store export buttons in here
+
         for ev in data.keys():
             self.tabs.append(QWidget())  # create a tab for the event
             self.tab.addTab(self.tabs[-1], ev)  # add the tab to the tab widget with the event name
@@ -1004,18 +1006,36 @@ class TableWindow(QDialog):
             m, _ = data[ev].shape  # get number of rows
 
             self.tables.append(self.createTable(m, 2))  # create and append the m-by-2 table for time and voltage
-            self.tables[-1].setHorizontalHeaderLabels('Time;Voltage [mv]'.split(';'))  # set appropriate headers
+            self.tables[-1].setHorizontalHeaderLabels('Time [s];Voltage [mv]'.split(';'))  # set appropriate headers
 
             # set the data in the table
             for i in range(m):
                 self.tables[-1].setItem(i, 0, QTableWidgetItem(str(data[ev][i, 0])))
                 self.tables[-1].setItem(i, 1, QTableWidgetItem(str(data[ev][i, 1])))
 
+            # create the export button
+            eButtons.append(QPushButton('Export', self))
+            eButtons[-1].clicked.connect(lambda: self.exportData(data[ev]))
+
             self.tables[-1].move(0, 0)
             self.tabs[-1].layout.addWidget(self.tables[-1])
+            self.tabs[-1].layout.addWidget(eButtons[-1])
             self.tabs[-1].setLayout(self.tabs[-1].layout)
 
         # TODO add export button and function for R-peak data
+
+    def exportData(self, data):
+        """
+        Export tabulated data to the chosen file.  If a csv file is chosen, delimiter is comma, if .txt, a space
+        """
+        saveFile, _ = QFileDialog.getSaveFileName(self, "Export Data", "", "CSV (*.csv);;TXT (*.txt);;All Files (*.*)",
+                                                  options=QFileDialog.Options())
+
+        if saveFile:
+            if '.csv' in saveFile:
+                savetxt(saveFile, data, delimiter=',', fmt='%.8f', header='Time [s], Voltage[mv]')
+            else:
+                savetxt(saveFile, data, delimiter=' ', fmt='%.8f', header='Time [s], Voltage[mv]')
 
     def createTable(self, m, n):
         table = QTableWidget()
