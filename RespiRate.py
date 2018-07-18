@@ -38,6 +38,7 @@ class RespiRate(QMainWindow):
         self.filtSet = FilterSettingsWindow(self)
         self.settings = SettingsWindow(self)
         self.rpkTab = TableWindow(self)
+        self.rrTab = TableWindow(self)
 
         self.initUI()
 
@@ -98,6 +99,12 @@ class RespiRate(QMainWindow):
         self.rpkTabAct.setDisabled(True)
         self.rpkTabAct.triggered.connect(self.open_rpkTab)
 
+        # Open RR table window
+        self.rrTabAct = QAction(QIcon('Icons\\next.png'), 'Breaths Table', self)
+        self.rrTabAct.setStatusTip('View Breath times')
+        self.rrTabAct.setDisabled(True)
+        self.rrTabAct.triggered.connect(self.open_rrTab)
+
         menubar = self.menuBar()
         filemenu = menubar.addMenu('&File')
         runmenu = menubar.addMenu('&Analysis')
@@ -110,6 +117,7 @@ class RespiRate(QMainWindow):
         filemenu.addAction(exitAct)
 
         datamenu.addAction(self.rpkTabAct)
+        datamenu.addAction(self.rrTabAct)
 
         settingsmenu.addAction(filtSetAct)
         settingsmenu.addAction(setAct)
@@ -512,6 +520,9 @@ class RespiRate(QMainWindow):
     def open_rpkTab(self):
         self.rpkTab.populateFromDict(self.ECG.r_pks)
         self.rpkTab.show()
+
+    def open_rrTab(self):
+        pass
 
 
 class FormWidget(QWidget):
