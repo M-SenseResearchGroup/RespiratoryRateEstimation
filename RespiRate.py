@@ -23,6 +23,7 @@ from matplotlib.figure import Figure
 from matplotlib.patches import Patch
 
 
+# TODO add a saved settings file to store settings between sessions.
 class RespiRate(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -433,7 +434,7 @@ class RespiRate(QMainWindow):
         home_dir = "C:\\Users\\Lukas Adamowicz\\Dropbox\\Masters\\Project - Bike Study\\RespiratoryRate_HeartRate\\" +\
                    "RespiratoryRateEstimation\\Validation_Data\\RespRate_PPG_Phone\\DN"
 
-        annotationFile, _ = QFileDialog.getOpenFileName(self, "Open MC10 Annotation File", home_dir,
+        annotationFile, _ = QFileDialog.getOpenFileName(self, "Open MC10 Annotation File", '',
                                                         "Comma Separated Value (*.csv);;All Files (*.*)",
                                                         options=QFileDialog.Options())
 
@@ -460,7 +461,7 @@ class RespiRate(QMainWindow):
                    "RespiratoryRateEstimation\\Validation_Data\\RespRate_PPG_Phone\\DN\\ecg_lead_ii\\d5la7xul\\" +\
                    "2018-01-24T03-18-36-159Z"
 
-        leadFile, _ = QFileDialog.getOpenFileName(self, "Open MC10 ECG file", home_dir,
+        leadFile, _ = QFileDialog.getOpenFileName(self, "Open MC10 ECG file", '',
                                                   "Comma Separated Value (*.csv);;All Files (*.*)",
                                                   options=QFileDialog.Options())
 
