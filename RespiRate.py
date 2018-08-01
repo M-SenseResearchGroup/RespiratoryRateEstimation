@@ -7,7 +7,7 @@ Lukas Adamowicz
 Python 3.6.5 on Windows 10 with 64-bit Anaconda
 """
 
-import sys
+from sys import exit as sys_exit, argv as sys_argv, excepthook as sys_excepthook
 from os import getcwd
 from PyQt5.QtWidgets import QMainWindow, QApplication, QFileDialog, QAction, qApp, QMessageBox, QMenu, \
     QLabel, QLineEdit, QHBoxLayout, QVBoxLayout, QGroupBox, QDialog, QCheckBox, QPushButton, QWidget, QComboBox, \
@@ -1069,21 +1069,21 @@ class TableWindow(QDialog):
 
 # below code allows exceptions to be reported for debugging the program
 # Back up the reference to the exceptionhook
-sys._excepthook = sys.excepthook
+sys__excepthook = sys_excepthook
 
 
 def my_exception_hook(exctype, value, traceback):
     # Print the error and traceback
     print(exctype, value, traceback)
     # Call the normal Exception hook after
-    sys._excepthook(exctype, value, traceback)
-    sys.exit(1)
+    sys__excepthook(exctype, value, traceback)
+    sys_exit(1)
 
 
 # Set the exception hook to our wrapping function
-sys.excepthook = my_exception_hook
+sys_excepthook = my_exception_hook
 
 if __name__ == '__main__':
-    app = QApplication(sys.argv)
+    app = QApplication(sys_argv)
     RR = RespiRate()
-    sys.exit(app.exec_())
+    sys_exit(app.exec_())
