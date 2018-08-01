@@ -8,9 +8,10 @@ Python 3.6.3 on Windows 10 with 64-bit Anaconda
 """
 from numpy import zeros_like, argwhere, where, array, insert, cumsum, mean, zeros, argmax, median, full_like, unique, \
     argmin, arange, percentile, append, delete as np_delete, concatenate, std
-import matplotlib.pyplot as pl
-import matplotlib.patches as mpatches
-from scipy import signal, interpolate
+from matplotlib.pyplot import subplots, tight_layout
+from matplotlib.patches import Patch
+from scipy.signal import butter, detrend as sig_detrend, filtfilt, iirnotch, argrelmax, argrelmin
+from scipy.interpolate import CubicSpline
 
 
 class EcgData:
@@ -100,15 +101,15 @@ class ECGAnalysis(object):
 
         w_cut = cutoff/self.nyq  # cutoff frequency as percentage of nyquist frequency
 
-        b, a = signal.butter(N, w_cut, 'highpass')  # setup high pass filter
+        b, a = butter(N, w_cut, 'highpass')  # setup high pass filter
 
         # perform filtering on the data
         for key in self.vd:
-            self.v[key] = signal.filtfilt(b, a, self.v[key])
+            self.v[key] = filtfilt(b, a, self.v[key])
 
         if debug:
             n = len(self.vd)
-            f, ax = pl.subplots(n, figsize=(16, 8))
+            f, ax = subplots(n, figsize=(16, 8))
             for i, key in zip(range(n), self.vd):
                 ax[i].plot(self.t[key], self.v_old[key], label='initial')
                 ax[i].plot(self.t[key], self.v[key], label='Step 1')
@@ -116,7 +117,7 @@ class ECGAnalysis(object):
                 ax[i].set_ylabel('Voltage [mV]')
                 ax[i].legend(title=f'{key}')
             ax[0].set_title('1 - Eliminate Low Frequencies')
-            pl.tight_layout()
+            tight_layout()
 
     def ElimVeryHighFreq(self, cutoff=20, N=1, detrend=True, debug=False):
         """
@@ -141,20 +142,20 @@ class ECGAnalysis(object):
         w_cut = cutoff/self.nyq
 
         # setup filter parameters
-        b, a = signal.butter(N, w_cut, 'lowpass')
+        b, a = butter(N, w_cut, 'lowpass')
 
         for key in self.vd:
             # detrend - remove mean, linear associations
             if detrend:
-                data_det = signal.detrend(self.v[key])
-                self.v[key] = signal.filtfilt(b, a, data_det)
+                data_det = sig_detrend(self.v[key])
+                self.v[key] = filtfilt(b, a, data_det)
             else:
                 # filter input data
-                self.v[key] = signal.filtfilt(b, a, self.v[key])
+                self.v[key] = filtfilt(b, a, self.v[key])
 
         if debug:
             n = len(self.vd)
-            f, ax = pl.subplots(n, figsize=(16, 8))
+            f, ax = subplots(n, figsize=(16, 8))
             for i, key in zip(range(n), self.vd):
                 ax[i].plot(self.t[key], self.v_old[key], label='Step 1')
                 ax[i].plot(self.t[key], self.v[key], label='Step 2')
@@ -162,7 +163,7 @@ class ECGAnalysis(object):
                 ax[i].set_ylabel('Voltage [mV]')
                 ax[i].legend(title=f'{key}')
             ax[0].set_title('2 - Eliminate Very High Frequencies')
-            pl.tight_layout()
+            tight_layout()
 
     def ElimMainsFreq(self, cutoff=60, Q=10, detrend=True, debug=False):
         """
@@ -184,18 +185,18 @@ class ECGAnalysis(object):
             self.v_old = self.v.copy()
 
         w0 = cutoff/self.nyq
-        b, a = signal.iirnotch(w0, Q)
+        b, a = iirnotch(w0, Q)
 
         for key in self.vd:
             if detrend:
-                data_det = signal.detrend(self.v[key])
-                self.v[key] = signal.filtfilt(b, a, data_det)
+                data_det = sig_detrend(self.v[key])
+                self.v[key] = filtfilt(b, a, data_det)
             else:
-                self.v[key] = signal.filtfilt(b, a, self.v[key])
+                self.v[key] = filtfilt(b, a, self.v[key])
 
         if debug:
             n = len(self.vd)
-            f, ax = pl.subplots(n, figsize=(16, 8))
+            f, ax = subplots(n, figsize=(16, 8))
             for i, key in zip(range(n), self.vd):
                 ax[i].plot(self.t[key], self.v_old[key], label='Step 2')
                 ax[i].plot(self.t[key], self.v[key], label='Step 3')
@@ -203,7 +204,7 @@ class ECGAnalysis(object):
                 ax[i].set_ylabel('Voltage [mV]')
                 ax[i].legend(title=f'{key}')
                 ax[0].set_title('3 - Eliminate Mains Frequencies')
-                pl.tight_layout()
+                tight_layout()
 
     def CheckLeadInversion(self, debug=False):
         """
@@ -219,7 +220,7 @@ class ECGAnalysis(object):
         # indices where squared data is greater than 20% of squared max
         inds = argwhere(d2>0.2*d2_max)
         d2_max_pks[inds] = d2[inds]  # squared values greater than 20% max, 0s elsewhere
-        d2_pks = signal.argrelmax(d2_max_pks)[0]  # locations of maximum peaks
+        d2_pks = argrelmax(d2_max_pks)[0]  # locations of maximum peaks
 
         # data values at local extrema (found from squard values)
         d_pks = self.v[self.vd[0]][d2_pks]
@@ -229,19 +230,19 @@ class ECGAnalysis(object):
 
         if debug:
             x = array([i for i in range(len(self.v[self.vd[0]]))])
-            f, ax = pl.subplots(figsize=(9, 5))
+            f, ax = subplots(figsize=(9, 5))
             ax.plot(x, self.v[self.vd[0]])
             ax.plot(x[d2_pks], self.v[self.vd[0]][d2_pks], '+')
             ax.set_xlabel('Sample No.')
             ax.set_ylabel('Voltage [mV]')
             ax.set_title('4 - Check Lead Inversion')
-            pl.tight_layout()
+            tight_layout()
 
-        if p_neg_pks>=0.5:
+        if p_neg_pks >= 0.5:
             for key in self.vd:
                 self.v[key] *= -1
                 self.lead_inv = True
-        elif p_neg_pks<0.5:
+        elif p_neg_pks < 0.5:
             self.lead_inv = False
 
     def ElimSubCardiacFreq(self, cutoff=0.5, N=4, debug=False):
@@ -260,14 +261,14 @@ class ECGAnalysis(object):
             self.v_old = self.v.copy()
 
         w_cut = cutoff/self.nyq  # define cutoff frequency as % of nyq. freq.
-        b, a = signal.butter(N, w_cut, 'highpass')  # setup high pass filter
+        b, a = butter(N, w_cut, 'highpass')  # setup high pass filter
 
         for key in self.vd:
-            self.v[key] = signal.filtfilt(b, a, self.v[key])
+            self.v[key] = filtfilt(b, a, self.v[key])
 
         if debug:
             n = len(self.vd)
-            f, ax = pl.subplots(n, figsize=(16,8))
+            f, ax = subplots(n, figsize=(16,8))
             for i, key in zip(range(n), self.vd):
                 ax[i].plot(self.t[key], self.v_old[key], label='Step 4')
                 ax[i].plot(self.t[key], self.v[key], label='Step 5')
@@ -275,7 +276,7 @@ class ECGAnalysis(object):
                 ax[i].set_ylabel('Voltage [mV]')
                 ax[i].legend(title=f'{key}')
                 ax[0].set_title('5 - Eliminate Sub-Cardiac Frequencies')
-                pl.tight_layout()
+                tight_layout()
 
         try:
             self.v_old = None  # remove from memory
@@ -307,7 +308,7 @@ class ECGAnalysis(object):
         self.v_der[key] = insert(self.v_der[key], 0, [0]*2)
 
         if debug:
-            f, ax = pl.subplots(2, figsize=(9, 5), sharex=True)
+            f, ax = subplots(2, figsize=(9, 5), sharex=True)
             ax[0].plot(self.t_der[key][2:], self.v_der[key][:-2], label='Derivative')
             ax[1].plot(self.t_der[key][2:], self.v_der[key][:-2]**2, label='Squared')
             ax[0].legend()
@@ -346,7 +347,7 @@ class ECGAnalysis(object):
             self.t_ma[key] = insert(self.t_ma[key], 0, [0]*(self.mfl_n-1))
 
         if debug:
-            f, ax = pl.subplots(figsize=(16, 5))
+            f, ax = subplots(figsize=(16, 5))
             ax.plot(self.t_ma[key][self.mfl_n+1:], self.v_ma[key][self.mfl_n+1:], label='Moving Average')
             ax.legend()
             ax.set_xlabel('Time [s]')
@@ -372,7 +373,7 @@ class ECGAnalysis(object):
 
         for key in self.vd:
             # peak indices in region with width equal to moving average width
-            va_pts = signal.argrelmax(self.v_ma[key], order=int(round(0.5*self.mfl_n)))[0]
+            va_pts = argrelmax(self.v_ma[key], order=int(round(0.5*self.mfl_n)))[0]
             # remove any points that are less than 0.1% of the mean of the peaks
             va_pts = va_pts[where(self.v_ma[key][va_pts] > 0.001*mean(self.v_ma[key][va_pts]))[0]]
             # descending half-peak value allocation
@@ -518,7 +519,7 @@ class ECGAnalysis(object):
                 self.q_trs[key][i] = [self.t[key][i_qtr], self.v[key][i_qtr]]
 
             if debug:
-                f, ax = pl.subplots(2, figsize=(14, 5), sharex=True)
+                f, ax = subplots(2, figsize=(14, 5), sharex=True)
                 ax[0].plot(self.t[key], self.v[key])
                 ax[1].plot(self.t_ma[key][self.mfl_n:], self.v_ma[key][self.mfl_n:])
 
@@ -668,9 +669,9 @@ class ECGAnalysis(object):
         M by 2 array of time and parameters, with timestep = dt
         """
 
-        cs1 = interpolate.CubicSpline(data[:, 0], data[:, 1])  # setup spline function
-        cs2 = interpolate.CubicSpline(data[:, 0], data[:, 2])  # setup 2nd spline function
-        cs3 = interpolate.CubicSpline(data[:, 0], data[:, 3])  # setup 3rd spline function
+        cs1 = CubicSpline(data[:, 0], data[:, 1])  # setup spline function
+        cs2 = CubicSpline(data[:, 0], data[:, 2])  # setup 2nd spline function
+        cs3 = CubicSpline(data[:, 0], data[:, 3])  # setup 3rd spline function
 
         x = arange(data[0, 0], data[-1, 0], dt)  # setup x values.  dt second intervals
         # if x-values don't include end time, add it to the array
@@ -692,7 +693,7 @@ class ECGAnalysis(object):
         if 'r_pks' not in self.__dict__.keys():
             raise OrderError("Plotting Heart Rate must be done after detecting R-peaks.")
         else:
-            f, ax = pl.subplots(figsize=(16, 6))
+            f, ax = subplots(figsize=(16, 6))
 
             for i in self.vd:
                 ax.plot(self.r_pks[i][1:, 0]-self.r_pks[i][0, 0], 60/(self.r_pks[i][1:, 0]-self.r_pks[i][:-1, 0]),
@@ -751,16 +752,16 @@ class ECGAnalysis(object):
             wl = 0.1/(0.5*fs)  # low cutoff frequency as % of nyquist frequency
             wh = 0.5/(0.5*fs)  # high cutoff freq as % of nyquist freq
 
-            b, a = signal.butter(5, [wl, wh], 'bandpass')  # filtfilt, -> order is 2x given
+            b, a = butter(5, [wl, wh], 'bandpass')  # filtfilt, -> order is 2x given
 
             # remove mean from data and filter
             mn = mean(self.rr_spl[key][:, 1:], axis=0)
-            rr_splf[:,0] = signal.filtfilt(b, a, self.rr_spl[key][:, 1]-mn[0])
-            rr_splf[:,1] = signal.filtfilt(b, a, self.rr_spl[key][:, 2]-mn[1])
-            rr_splf[:,2] = signal.filtfilt(b, a, self.rr_spl[key][:, 3]-mn[2])
+            rr_splf[:, 0] = filtfilt(b, a, self.rr_spl[key][:, 1]-mn[0])
+            rr_splf[:, 1] = filtfilt(b, a, self.rr_spl[key][:, 2]-mn[1])
+            rr_splf[:, 2] = filtfilt(b, a, self.rr_spl[key][:, 3]-mn[2])
 
             if debug:
-                f, ax = pl.subplots(3,figsize=(16, 5), sharex=True)
+                f, ax = subplots(3, figsize=(16, 5), sharex=True)
                 ax[0].plot(self.rr_spl[key][:, 0], self.rr_spl[key][:, 1], 'k--', alpha=0.5, label='initial')
                 ax[1].plot(self.rr_spl[key][:, 0], self.rr_spl[key][:, 2], 'k--', alpha=0.5, label='initial')
                 ax[2].plot(self.rr_spl[key][:, 0], self.rr_spl[key][:, 3], 'k--', alpha=0.5, label='initial')
@@ -772,8 +773,8 @@ class ECGAnalysis(object):
             for i, param in zip(range(3), ['fm', 'am', 'bw']):
                 # step 2 - find local minima and maxima of filtered data
                 # get 3rd quartile, threshold is Q3*0.2
-                minpt = signal.argrelmin(rr_splf[:, i])[0]
-                maxpt = signal.argrelmax(rr_splf[:, i])[0]
+                minpt = argrelmin(rr_splf[:, i])[0]
+                maxpt = argrelmax(rr_splf[:, i])[0]
 
                 q3 = percentile(rr_splf[maxpt, i], 75)  # 3rd quartile (75th percentile)
                 thr = 0.2*q3  # threshold
@@ -831,28 +832,28 @@ class ECGAnalysis(object):
             wl = 0.1/(0.5*fs)  # low cutoff frequency as % of nyquist frequency
             wh = 0.5/(0.5*fs)  # high cutoff freq as % of nyquist freq
 
-            b, a = signal.butter(5, [wl, wh], 'bandpass')  # filtfilt, -> order is 2x given
+            b, a = butter(5, [wl, wh], 'bandpass')  # filtfilt, -> order is 2x given
 
             rr_splf = zeros_like(self.rr_spl[key][:, 1:])
             mn = mean(self.rr_spl[key][:, 1:], axis=0)
 
             # remove mean and apply filter to input spline data
-            # rr_splf[:, 0] = signal.filtfilt(b, a, self.rr_spl[key][:, 1]-mn[0])
-            # rr_splf[:, 1] = signal.filtfilt(b, a, self.rr_spl[key][:, 2]-mn[1])
-            # rr_splf[:, 2] = signal.filtfilt(b, a, self.rr_spl[key][:, 3]-mn[2])
+            # rr_splf[:, 0] = filtfilt(b, a, self.rr_spl[key][:, 1]-mn[0])
+            # rr_splf[:, 1] = filtfilt(b, a, self.rr_spl[key][:, 2]-mn[1])
+            # rr_splf[:, 2] = filtfilt(b, a, self.rr_spl[key][:, 3]-mn[2])
 
             if debug:
-                f, ax = pl.subplots(3, figsize=(16, 9), sharex=True)
+                f, ax = subplots(3, figsize=(16, 9), sharex=True)
 
             for i, param in zip(range(3), ['fm', 'am', 'bw']):
                 # remove mean and apply filter to input spline data
-                inter = signal.filtfilt(b, a, self.rr_spl[key][:, i+1]-mn[i])
+                inter = filtfilt(b, a, self.rr_spl[key][:, i+1]-mn[i])
                 self.rr_spl[key][:, i+1] = inter
 
                 # step 2 - find local minima and maxima of filtered data
                 # get 3rd quartile, threshold is Q3*0.2
-                minpt = signal.argrelmin(self.rr_spl[key][:, i+1])[0]
-                maxpt = signal.argrelmax(self.rr_spl[key][:, i+1])[0]
+                minpt = argrelmin(self.rr_spl[key][:, i+1])[0]
+                maxpt = argrelmax(self.rr_spl[key][:, i+1])[0]
 
                 # step 3 - calculate absolute value diff. between subsequent local extrema
                 # 3rd quartile of differences, threshold = 0.1*Q3
@@ -932,9 +933,9 @@ class ECGAnalysis(object):
                 self.rr[key][param][:, 1] *= 60
 
             # calculate spline functions
-            fmsf = interpolate.CubicSpline(self.rr[key]['fm'][:, 0], self.rr[key]['fm'][:, 1])
-            amsf = interpolate.CubicSpline(self.rr[key]['am'][:, 0], self.rr[key]['am'][:, 1])
-            bwsf = interpolate.CubicSpline(self.rr[key]['bw'][:, 0], self.rr[key]['bw'][:, 1])
+            fmsf = CubicSpline(self.rr[key]['fm'][:, 0], self.rr[key]['fm'][:, 1])
+            amsf = CubicSpline(self.rr[key]['am'][:, 0], self.rr[key]['am'][:, 1])
+            bwsf = CubicSpline(self.rr[key]['bw'][:, 0], self.rr[key]['bw'][:, 1])
 
             if use_given_time:
                 x = unique(concatenate((self.rr[key]['fm'][:, 0], self.rr[key]['am'][:, 0],
@@ -961,7 +962,7 @@ class ECGAnalysis(object):
             self.rr_fuse[key][:, 0] = x
 
             if plot:
-                f, ax = pl.subplots(figsize=(16, 5))
+                f, ax = subplots(figsize=(16, 5))
                 line1, = ax.plot(self.rr_fuse[key][:, 0], self.rr_fuse[key][:, 1], label='Fused Est.')
 
                 ind = argwhere(self.lqi[key][1:] != self.lqi[key][:-1]).flatten() + 1
@@ -972,8 +973,8 @@ class ECGAnalysis(object):
                                     alpha=0.5, color='red' if self.lqi[key][i1] else 'blue')
                 ax.set_title(f'{key}')
 
-                b_p = mpatches.Patch(color='blue', alpha=0.5, label='St. Dev. < 4 BPM')
-                r_p = mpatches.Patch(color='red', alpha=0.5, label='St. Dev. > 4 BPM')
+                b_p = Patch(color='blue', alpha=0.5, label='St. Dev. < 4 BPM')
+                r_p = Patch(color='red', alpha=0.5, label='St. Dev. > 4 BPM')
                 ax.legend(handles=[b_p, r_p, line1])
 
 
