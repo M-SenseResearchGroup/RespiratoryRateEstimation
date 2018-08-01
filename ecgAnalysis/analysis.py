@@ -977,6 +977,6 @@ class ECGAnalysis(object):
                 ax.legend(handles=[b_p, r_p, line1])
 
 
-f = open('..\\sample_EcgAnalysis_v2_data.pickle', 'rb')
-data = pickle_load(f)
-test = ECGAnalysis(data['KJ'])
+# f = open('..\\sample_EcgAnalysis_v2_data.pickle', 'rb')
+# data = pickle_load(f)
+# test = ECGAnalysis(data['KJ'])
