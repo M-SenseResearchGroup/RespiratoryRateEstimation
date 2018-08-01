@@ -14,7 +14,7 @@ from PyQt5.QtWidgets import QMainWindow, QApplication, QFileDialog, QAction, qAp
     QRadioButton, QTableWidget, QTableWidgetItem, QTabWidget
 from PyQt5.QtGui import QIcon, QFont
 from PyQt5.QtCore import pyqtSlot, Qt
-from ECGAnalysis_v2 import ECGAnalysis, EcgData
+from ecgAnalysis import EcgData, ECGAnalysis
 from numpy import loadtxt, array, argmin, argwhere, append, insert, savetxt
 from pickle import load as Pload, dump as Pdump
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
