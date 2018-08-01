@@ -386,21 +386,22 @@ class ECGAnalysis(object):
             for i in range(len(va_pts)):
                 # finding maximum slope in the +- width surrounding peaks
                 i1 = va_pts[i]-self.mfl_n if va_pts[i]-self.mfl_n > 0 else 0
-                i2 = va_pts[i]+self.mfl_n if va_pts[i]+self.mfl_n<=len(self.v_der[key]) else len(self.v_der[key])
+                i2 = va_pts[i]+self.mfl_n if va_pts[i]+self.mfl_n <= len(self.v_der[key]) else len(self.v_der[key])
                 m_pos[i] = [max(self.v_der[key][i1:i2])+va_pts[i]-self.mfl_n, argmax(self.v_der[key][i1:i2])+i1]
 
                 # find descending half-peak value in moving average data
                 try:
-                    hpt[i] = where(self.v_ma[key][va_pts[i]:va_pts[i]+ndly]<0.5*self.v_ma[key][va_pts[i]])[0][0] + va_pts[i]
+                    hpt[i] = where(self.v_ma[key][va_pts[i]:va_pts[i]+ndly] < 0.5*self.v_ma[key][va_pts[i]])[0][0] + \
+                             va_pts[i]
                     longwave = False  # half peak found => not a long QRS complex
                 except:
-                    hpt[i] = m_pos[i,1] + ndly if m_pos[i,1] + ndly < len(self.v_ma[key]) else len(self.v_ma[key])-1
+                    hpt[i] = m_pos[i, 1] + ndly if m_pos[i, 1] + ndly < len(self.v_ma[key]) else len(self.v_ma[key])-1
                     longwave = True  # half peak not found => long QRS complex
 
                 # find maximum values in filtered data preceding descending half-peak in
                 # moving average data
                 if not longwave:  # if not a long wave search preceding 225 to 125 ms
-                    i1 = hpt[i]-n225 if hpt[i]-n225>0 else 0
+                    i1 = hpt[i]-n225 if hpt[i]-n225 > 0 else 0
                     i2 = hpt[i]-n125
                     vf_pks[i] = [max(self.v[key][i1:i2]), argmax(self.v[key][i1:i2])+i1]
                 elif longwave:  # if long wave, search preceding 250 to 150 ms
@@ -410,7 +411,7 @@ class ECGAnalysis(object):
 
             sntf = TSN()  # signal/Noise thresholds for filtered data
             snta = TSN()  # signal/Noise thresholds for moving average data
-            sntf.t = 0.125*median(vf_pks[:,0])  # initialize thresholds with 1/8 of median
+            sntf.t = 0.125*median(vf_pks[:, 0])  # initialize thresholds with 1/8 of median
             snta.t = 0.125*median(self.v_ma[key][va_pts])
 
             r_pk_b = full_like(hpt, False, dtype=bool)  # store if peak is R-peak (T) or not (F)
@@ -420,41 +421,41 @@ class ECGAnalysis(object):
             nrpk = 0  # keep count for first 8 R-peaks (threshold learning)
             while nrpk < 9:
                 # Are the moving average and filtered peaks above the thresholds
-                if vf_pks[k,0] > sntf.t and self.v_ma[key][va_pts[k]] > snta.t:
+                if vf_pks[k, 0] > sntf.t and self.v_ma[key][va_pts[k]] > snta.t:
                     # is this peak more than 0.36s away from the last R-peak?
-                    if (vf_pks[k,1]-vf_pks[j,1])*self.dt > 0.36:
+                    if (vf_pks[k, 1]-vf_pks[j,1])*self.dt > 0.36:
                         r_pk_b[k] = True  # r-peak was detected
                         nrpk += 1  # update number found for learning
                         j = k  # update last found r-peak index
                         if nrpk == 1:  # change the thresholds to values based on the R-peak
-                            sntf.t = 0.125*vf_pks[k,0]
+                            sntf.t = 0.125*vf_pks[k, 0]
                             snta.t = 0.125*self.v_ma[key][va_pts[k]]
                         # Update all the signal/noise/threshold values
-                        self._UpdateThresholds(self.v_ma[key][va_pts[k]], vf_pks[k,0], snta, sntf, sig=True)
+                        self._UpdateThresholds(self.v_ma[key][va_pts[k]], vf_pks[k, 0], snta, sntf, sig=True)
                     # is this peak more than 0.2s but less than 0.36s away from last R-peak?
-                    elif (vf_pks[k,1]-vf_pks[j,1])*self.dt > 0.2:
+                    elif (vf_pks[k, 1]-vf_pks[j, 1])*self.dt > 0.2:
                         # is the slope of this peak greater than half the slope of the last R-peak?
-                        if m_pos[k,0] > 0.5*m_pos[j,0]:
+                        if m_pos[k, 0] > 0.5*m_pos[j, 0]:
                             r_pk_b[k] = True
                             nrpk += 1
                             j = k
                             if nrpk == 1:
-                                sntf.t = 0.125*vf_pks[k,0]
+                                sntf.t = 0.125*vf_pks[k, 0]
                                 snta.t = 0.125*self.v_ma[key][va_pts[k]]
-                            self._UpdateThresholds(self.v_ma[key][va_pts[k]], vf_pks[k,0], snta, sntf, sig=True)
+                            self._UpdateThresholds(self.v_ma[key][va_pts[k]], vf_pks[k, 0], snta, sntf, sig=True)
                     # check for duplicate points, don't want to double count for updating thresholds
-                    elif (vf_pks[k,1]-vf_pks[j,1])*self.dt ==0:
+                    elif (vf_pks[k, 1]-vf_pks[j, 1])*self.dt == 0:
                         pass
                     # if the peak was less than 0.2s away from the last R-peak, it is noise
                     else:
-                        self._UpdateThresholds(self.v_ma[key][va_pts[k]], vf_pks[k,0], snta, sntf, sig=False)
-                #if the peak was not above the thresholds, it is noise
+                        self._UpdateThresholds(self.v_ma[key][va_pts[k]], vf_pks[k, 0], snta, sntf, sig=False)
+                # if the peak was not above the thresholds, it is noise
                 else:
-                    self._UpdateThresholds(self.v_ma[key][va_pts[k]], vf_pks[k,0], snta, sntf, sig=False)
+                    self._UpdateThresholds(self.v_ma[key][va_pts[k]], vf_pks[k, 0], snta, sntf, sig=False)
                 k += 1
 
             # calculate initial learning RR times
-            rr8 = self.t[key][vf_pks[r_pk_b,1][1:].astype(int)] - self.t[key][vf_pks[r_pk_b,1][:-1].astype(int)]
+            rr8 = self.t[key][vf_pks[r_pk_b, 1][1:].astype(int)] - self.t[key][vf_pks[r_pk_b, 1][:-1].astype(int)]
             rr8_lim = rr8.copy()  # initialize limited R-R array with normal R-R array
 
             # determe if the peaks are R-peaks or other
@@ -471,59 +472,58 @@ class ECGAnalysis(object):
                                                                     self.t[key][vf_pks[j:i, 1].astype(int)], snta, sntf)
                             if index != []:
                                 index = array(index) + j
-                                rr8, rr8_lim = self._UpdateAvgRR(self.t[key][int(vf_pks[i,1])]-\
-                                                                 self.t[key][int(vf_pks[index[-1],1])], rr8, rr8_lim)
+                                rr8, rr8_lim = self._UpdateAvgRR(self.t[key][int(vf_pks[i, 1])] -
+                                                                 self.t[key][int(vf_pks[index[-1], 1])], rr8, rr8_lim)
                                 r_pk_b[index] = True
                         else:
-                            rr8, rr8_lim = self._UpdateAvgRR(self.t[key][int(vf_pks[i,1])]-self.t[key][int(vf_pks[j,1])],\
-                                                             rr8, rr8_lim)
+                            rr8, rr8_lim = self._UpdateAvgRR(self.t[key][int(vf_pks[i, 1])] -
+                                                             self.t[key][int(vf_pks[j, 1])], rr8, rr8_lim)
                         j = i
-                        self._UpdateThresholds(self.v_ma[key][va_pts[i]],vf_pks[i,0], snta, sntf, sig=True)
+                        self._UpdateThresholds(self.v_ma[key][va_pts[i]], vf_pks[i, 0], snta, sntf, sig=True)
 
                     # is the time difference between 0.2 and 0.36s?
                     # TODO i+1 here?
-                    elif (vf_pks[i,1]-vf_pks[j,1])*self.dt > 0.2:
+                    elif (vf_pks[i, 1]-vf_pks[j, 1])*self.dt > 0.2:
                         # is the slope greater than 50% of previous R-peak slope?
-                        if m_pos[i,0] > 0.5*m_pos[j,0]:
+                        if m_pos[i, 0] > 0.5*m_pos[j, 0]:
                             r_pk_b[i] = True
-                            rr8, rr8_lim = self._UpdateAvgRR(self.t[key][int(vf_pks[i,1])]-self.t[key][int(vf_pks[j,1])],\
-                                                             rr8, rr8_lim)
-                            self._UpdateThresholds(self.v_ma[key][va_pts[i]], vf_pks[i,0], snta, sntf, sig=True)
+                            rr8, rr8_lim = self._UpdateAvgRR(self.t[key][int(vf_pks[i, 1])] -
+                                                             self.t[key][int(vf_pks[j, 1])], rr8, rr8_lim)
+                            self._UpdateThresholds(self.v_ma[key][va_pts[i]], vf_pks[i, 0], snta, sntf, sig=True)
                             j = i
                     # check for duplicate points, don't want to double count
                     # TODO i+1 here?
-                    elif (vf_pks[i,1]-vf_pks[j,1])*self.dt == 0:
+                    elif (vf_pks[i, 1]-vf_pks[j, 1])*self.dt == 0:
                         pass
                     # if the peak is less than 0.2s away from last R-peak, it is noise
                     else:
-                        self._UpdateThresholds(self.v_ma[key][va_pts[i]],vf_pks[i,0], snta, sntf, sig=False)
-                #if the peak is not above the thresholds, it is noise
+                        self._UpdateThresholds(self.v_ma[key][va_pts[i]], vf_pks[i, 0], snta, sntf, sig=False)
+                # if the peak is not above the thresholds, it is noise
                 else:
-                    self._UpdateThresholds(self.v_ma[key][va_pts[i]],vf_pks[i,0], snta, sntf, sig=False)
+                    self._UpdateThresholds(self.v_ma[key][va_pts[i]], vf_pks[i, 0], snta, sntf, sig=False)
 
-            indices = unique(vf_pks[r_pk_b,1].astype(int))
-            self.r_pks[key] = zeros((len(indices),2))  # allocate R-peak array
-            self.r_pks[key][:,0] = self.t[key][indices]  # set timings
-            self.r_pks[key][:,1] = self.v[key][indices]  # set peak values
+            indices = unique(vf_pks[r_pk_b, 1].astype(int))
+            self.r_pks[key] = zeros((len(indices), 2))  # allocate R-peak array
+            self.r_pks[key][:, 0] = self.t[key][indices]  # set timings
+            self.r_pks[key][:, 1] = self.v[key][indices]  # set peak values
 
             self.q_trs[key] = zeros_like(self.r_pks[key])  # allocate Q-trough array
 
-            for i in range(len(self.r_pks[key][:,0])):
+            for i in range(len(self.r_pks[key][:, 0])):
                 # determining index for R-peak
-                i_rpk = where(self.t[key]==self.r_pks[key][i,0])[0][0]
+                i_rpk = where(self.t[key] == self.r_pks[key][i, 0])[0][0]
                 # search in preceding 0.1s for minimum value
                 i_qtr = argmin(self.v[key][i_rpk-int(round(0.1*self.fs)):i_rpk]) + i_rpk-int(round(0.1*self.fs))
                 # set time of minimum value, as well as value itself for Q-trough
-                self.q_trs[key][i] = [self.t[key][i_qtr],self.v[key][i_qtr]]
-
+                self.q_trs[key][i] = [self.t[key][i_qtr], self.v[key][i_qtr]]
 
             if debug:
-                f, ax = pl.subplots(2,figsize=(14,5), sharex=True)
+                f, ax = pl.subplots(2, figsize=(14, 5), sharex=True)
                 ax[0].plot(self.t[key], self.v[key])
                 ax[1].plot(self.t_ma[key][self.mfl_n:], self.v_ma[key][self.mfl_n:])
 
-                ax[0].plot(self.t[key][vf_pks[r_pk_b,1].astype(int)], vf_pks[r_pk_b,0], 'bo')
-                ax[0].plot(self.t[key][vf_pks[:,1].astype(int)], vf_pks[:,0], 'r+')
+                ax[0].plot(self.t[key][vf_pks[r_pk_b, 1].astype(int)], vf_pks[r_pk_b, 0], 'bo')
+                ax[0].plot(self.t[key][vf_pks[:, 1].astype(int)], vf_pks[:, 0], 'r+')
                 ax[1].plot(self.t_ma[key][hpt], self.v_ma[key][hpt], 'ro')
                 ax[1].plot(self.t_ma[key][va_pts], self.v_ma[key][va_pts], 'ko')
 
@@ -789,7 +789,7 @@ class ECGAnalysis(object):
 
                 for j in range(len(ext)-2):
                     # if goes from local max to local min to local max
-                    if etp[j]==True and etp[j+2]==True and etp[j+1]==False:
+                    if etp[j] and etp[j+2] and not etp[j+1]:
                         # if the maximums are above the threshold and minimum below 0
                         if rr_splf[ext[j], i] > thr and rr_splf[ext[j+2], i] > thr and rr_splf[ext[j+1], i] < 0:
                             brth_cyc.append([ext[j], ext[j+2]])
