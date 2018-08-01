@@ -6,11 +6,11 @@ Lukas Adamowicz
 
 Python 3.6.3 on Windows 10 with 64-bit Anaconda
 """
-import numpy as np
+from numpy import zeros_like, argwhere, where, array, insert, cumsum, mean, zeros, argmax, median, full_like, unique, \
+    argmin, arange, percentile, append, delete as np_delete, concatenate, std
 import matplotlib.pyplot as pl
 import matplotlib.patches as mpatches
 from scipy import signal, interpolate
-from pickle import dump as pickle_dump, load as pickle_load
 
 
 class EcgData:
@@ -118,7 +118,7 @@ class ECGAnalysis(object):
             ax[0].set_title('1 - Eliminate Low Frequencies')
             pl.tight_layout()
 
-    def ElimVeryHighFreq(self,cutoff=20, N=1, detrend=True, debug=False):
+    def ElimVeryHighFreq(self, cutoff=20, N=1, detrend=True, debug=False):
         """
         Step 2: Eliminate very high frequencies for ECG data using a low-pass filter
         Should be run after "ElimLowFreq" function is run
@@ -214,10 +214,10 @@ class ECGAnalysis(object):
 
         d2 = self.v[self.vd[0]]**2  # square data for all positive and prominent peaks
         d2_max = max(d2)  # maximum of squared data
-        d2_max_pks = np.zeros_like(d2)  # allocate array for peaks
+        d2_max_pks = zeros_like(d2)  # allocate array for peaks
 
         # indices where squared data is greater than 20% of squared max
-        inds = np.argwhere(d2>0.2*d2_max)
+        inds = argwhere(d2>0.2*d2_max)
         d2_max_pks[inds] = d2[inds]  # squared values greater than 20% max, 0s elsewhere
         d2_pks = signal.argrelmax(d2_max_pks)[0]  # locations of maximum peaks
 
@@ -225,11 +225,11 @@ class ECGAnalysis(object):
         d_pks = self.v[self.vd[0]][d2_pks]
 
         # percentage of peaks with values that are negative
-        p_neg_pks = len(np.where(d_pks<0)[0])/len(d_pks)
+        p_neg_pks = len(where(d_pks < 0)[0])/len(d_pks)
 
         if debug:
-            x = np.array([i for i in range(len(self.v[self.vd[0]]))])
-            f, ax = pl.subplots(figsize=(9,5))
+            x = array([i for i in range(len(self.v[self.vd[0]]))])
+            f, ax = pl.subplots(figsize=(9, 5))
             ax.plot(x, self.v[self.vd[0]])
             ax.plot(x[d2_pks], self.v[self.vd[0]][d2_pks], '+')
             ax.set_xlabel('Sample No.')
@@ -304,7 +304,7 @@ class ECGAnalysis(object):
             self.t_der[key] = self.t[key][2:-2]*1
             self.t_der[key][:2] = 0  # timesteps are cut by 2 on either end
 
-        self.v_der[key] = np.insert(self.v_der[key],0,[0]*2)
+        self.v_der[key] = insert(self.v_der[key], 0, [0]*2)
 
         if debug:
             f, ax = pl.subplots(2, figsize=(9, 5), sharex=True)
@@ -335,15 +335,15 @@ class ECGAnalysis(object):
         self.t_ma = dict()
         for key in self.vd:
             # take preceding cumulative sum [1,2,3] -> [1,3,6]
-            cs = np.cumsum(self.v_der[key][1:]**2)
+            cs = cumsum(self.v_der[key][1:]**2)
             self.v_ma[key] = (cs[self.mfl_n:]-cs[:-self.mfl_n])/self.mfl_n
             # Array is shortened by N-1 entries by above operation
             self.t_ma[key] = self.t_der[key][self.mfl_n-1:]
 
             # add zeros back in to shortened arrays
             # adding n-1(moving average) + 2 (derivative) = n+1
-            self.v_ma[key] = np.insert(self.v_ma[key], 0, [0]*(self.mfl_n+1))
-            self.t_ma[key] = np.insert(self.t_ma[key], 0, [0]*(self.mfl_n-1))
+            self.v_ma[key] = insert(self.v_ma[key], 0, [0]*(self.mfl_n+1))
+            self.t_ma[key] = insert(self.t_ma[key], 0, [0]*(self.mfl_n-1))
 
         if debug:
             f, ax = pl.subplots(figsize=(16, 5))
@@ -374,24 +374,24 @@ class ECGAnalysis(object):
             # peak indices in region with width equal to moving average width
             va_pts = signal.argrelmax(self.v_ma[key], order=int(round(0.5*self.mfl_n)))[0]
             # remove any points that are less than 0.1% of the mean of the peaks
-            va_pts = va_pts[np.where(self.v_ma[key][va_pts] > 0.001*np.mean(self.v_ma[key][va_pts]))[0]]
+            va_pts = va_pts[where(self.v_ma[key][va_pts] > 0.001*mean(self.v_ma[key][va_pts]))[0]]
             # descending half-peak value allocation
-            hpt = np.zeros_like(va_pts)
+            hpt = zeros_like(va_pts)
             # maximum values and indices for filtered data
-            vf_pks = np.zeros((len(va_pts),2))
+            vf_pks = zeros((len(va_pts),2))
 
             # maximum slopes and indices for each peak
-            m_pos = np.zeros((len(va_pts),2))
+            m_pos = zeros((len(va_pts),2))
 
             for i in range(len(va_pts)):
                 # finding maximum slope in the +- width surrounding peaks
                 i1 = va_pts[i]-self.mfl_n if va_pts[i]-self.mfl_n > 0 else 0
                 i2 = va_pts[i]+self.mfl_n if va_pts[i]+self.mfl_n<=len(self.v_der[key]) else len(self.v_der[key])
-                m_pos[i] = [max(self.v_der[key][i1:i2])+va_pts[i]-self.mfl_n, np.argmax(self.v_der[key][i1:i2])+i1]
+                m_pos[i] = [max(self.v_der[key][i1:i2])+va_pts[i]-self.mfl_n, argmax(self.v_der[key][i1:i2])+i1]
 
                 # find descending half-peak value in moving average data
                 try:
-                    hpt[i] = np.where(self.v_ma[key][va_pts[i]:va_pts[i]+ndly]<0.5*self.v_ma[key][va_pts[i]])[0][0] + va_pts[i]
+                    hpt[i] = where(self.v_ma[key][va_pts[i]:va_pts[i]+ndly]<0.5*self.v_ma[key][va_pts[i]])[0][0] + va_pts[i]
                     longwave = False  # half peak found => not a long QRS complex
                 except:
                     hpt[i] = m_pos[i,1] + ndly if m_pos[i,1] + ndly < len(self.v_ma[key]) else len(self.v_ma[key])-1
@@ -402,18 +402,18 @@ class ECGAnalysis(object):
                 if not longwave:  # if not a long wave search preceding 225 to 125 ms
                     i1 = hpt[i]-n225 if hpt[i]-n225>0 else 0
                     i2 = hpt[i]-n125
-                    vf_pks[i] = [max(self.v[key][i1:i2]),np.argmax(self.v[key][i1:i2])+i1]
+                    vf_pks[i] = [max(self.v[key][i1:i2]), argmax(self.v[key][i1:i2])+i1]
                 elif longwave:  # if long wave, search preceding 250 to 150 ms
-                    i1 = hpt[i]-n225-n25 if hpt[i]-n225-n25>0 else 0
+                    i1 = hpt[i]-n225-n25 if hpt[i]-n225-n25 > 0 else 0
                     i2 = hpt[i]-n125-n25
-                    vf_pks[i] = [max(self.v[key][i1:i2]), np.argmax(self.v[key][i1:i2])+i1]
+                    vf_pks[i] = [max(self.v[key][i1:i2]), argmax(self.v[key][i1:i2])+i1]
 
             sntf = TSN()  # signal/Noise thresholds for filtered data
             snta = TSN()  # signal/Noise thresholds for moving average data
-            sntf.t = 0.125*np.median(vf_pks[:,0])  # initialize thresholds with 1/8 of median
-            snta.t = 0.125*np.median(self.v_ma[key][va_pts])
+            sntf.t = 0.125*median(vf_pks[:,0])  # initialize thresholds with 1/8 of median
+            snta.t = 0.125*median(self.v_ma[key][va_pts])
 
-            r_pk_b = np.full_like(hpt, False, dtype=bool)  # store if peak is R-peak (T) or not (F)
+            r_pk_b = full_like(hpt, False, dtype=bool)  # store if peak is R-peak (T) or not (F)
             # Determine the type of peak (R,T,etc) for learning phase (9 peaks->8 RR times)
             k = 1  # loop counter
             j = 0  # last detected R-peak counter
@@ -460,17 +460,17 @@ class ECGAnalysis(object):
             # determe if the peaks are R-peaks or other
             for i in range(k, len(va_pts)):
                 # Is the point greater than moving thresholds?
-                if vf_pks[i,0] > sntf.t and self.v_ma[key][va_pts[i]] > snta.t:
+                if vf_pks[i, 0] > sntf.t and self.v_ma[key][va_pts[i]] > snta.t:
                     # is the time difference between consecutive peaks greater than 0.36s
-                    if (vf_pks[i,1]-vf_pks[j,1])*self.dt > 0.36:
+                    if (vf_pks[i, 1]-vf_pks[j, 1])*self.dt > 0.36:
                         r_pk_b[i] = True
                         # if the time interval to last R-peak is greater than 166% of the limited average
-                        if (vf_pks[i,1]-vf_pks[j,1])*self.dt > 1.66*np.mean(rr8_lim):
-                            index, snta, sntf = self._SearchForPeak(self.v_ma[key][va_pts[j:i]], vf_pks[j:i,0],\
-                                                                    m_pos[j:i,0], self.t[key][vf_pks[j:i,1].astype(int)],\
-                                                                    snta, sntf)
+                        if (vf_pks[i, 1]-vf_pks[j, 1])*self.dt > 1.66*mean(rr8_lim):
+                            index, snta, sntf = self._SearchForPeak(self.v_ma[key][va_pts[j:i]], vf_pks[j:i, 0],
+                                                                    m_pos[j:i, 0],
+                                                                    self.t[key][vf_pks[j:i, 1].astype(int)], snta, sntf)
                             if index != []:
-                                index = np.array(index) + j
+                                index = array(index) + j
                                 rr8, rr8_lim = self._UpdateAvgRR(self.t[key][int(vf_pks[i,1])]-\
                                                                  self.t[key][int(vf_pks[index[-1],1])], rr8, rr8_lim)
                                 r_pk_b[index] = True
@@ -501,18 +501,18 @@ class ECGAnalysis(object):
                 else:
                     self._UpdateThresholds(self.v_ma[key][va_pts[i]],vf_pks[i,0], snta, sntf, sig=False)
 
-            indices = np.unique(vf_pks[r_pk_b,1].astype(int))
-            self.r_pks[key] = np.zeros((len(indices),2))  # allocate R-peak array
+            indices = unique(vf_pks[r_pk_b,1].astype(int))
+            self.r_pks[key] = zeros((len(indices),2))  # allocate R-peak array
             self.r_pks[key][:,0] = self.t[key][indices]  # set timings
             self.r_pks[key][:,1] = self.v[key][indices]  # set peak values
 
-            self.q_trs[key] = np.zeros_like(self.r_pks[key])  # allocate Q-trough array
+            self.q_trs[key] = zeros_like(self.r_pks[key])  # allocate Q-trough array
 
             for i in range(len(self.r_pks[key][:,0])):
                 # determining index for R-peak
-                i_rpk = np.where(self.t[key]==self.r_pks[key][i,0])[0][0]
+                i_rpk = where(self.t[key]==self.r_pks[key][i,0])[0][0]
                 # search in preceding 0.1s for minimum value
-                i_qtr = np.argmin(self.v[key][i_rpk-int(round(0.1*self.fs)):i_rpk]) + i_rpk-int(round(0.1*self.fs))
+                i_qtr = argmin(self.v[key][i_rpk-int(round(0.1*self.fs)):i_rpk]) + i_rpk-int(round(0.1*self.fs))
                 # set time of minimum value, as well as value itself for Q-trough
                 self.q_trs[key][i] = [self.t[key][i_qtr],self.v[key][i_qtr]]
 
@@ -597,7 +597,7 @@ class ECGAnalysis(object):
         rr8_lim : list of floats
         Updated list/array of last 8 R-R times that were between 92-116% of avg(rr8)
         """
-        if rr_t>0.92*np.mean(rr8) and rr_t<1.16*np.mean(rr8):
+        if rr_t>0.92*mean(rr8) and rr_t<1.16*mean(rr8):
             rr8_lim[:-1] = rr8_lim[1:]
             rr8_lim[-1] = rr_t
 
@@ -672,12 +672,12 @@ class ECGAnalysis(object):
         cs2 = interpolate.CubicSpline(data[:, 0], data[:, 2])  # setup 2nd spline function
         cs3 = interpolate.CubicSpline(data[:, 0], data[:, 3])  # setup 3rd spline function
 
-        x = np.arange(data[0, 0], data[-1, 0], dt)  # setup x values.  dt second intervals
+        x = arange(data[0, 0], data[-1, 0], dt)  # setup x values.  dt second intervals
         # if x-values don't include end time, add it to the array
         if data[-1, 0] not in x:
-            x = np.append(x, data[-1, 0])
+            x = append(x, data[-1, 0])
 
-        spl = np.zeros((len(x), 4))
+        spl = zeros((len(x), 4))
         spl[:, 0] = x
         spl[:, 1] = cs1(x)
         spl[:, 2] = cs2(x)
@@ -717,7 +717,7 @@ class ECGAnalysis(object):
         for key in self.vd:
             # allocate array.  FM is cut 1 short due to difference
             # so exclude first of other parameters as well
-            self.rr_p[key] = np.zeros((len(self.r_pks[key])-1, 4))
+            self.rr_p[key] = zeros((len(self.r_pks[key])-1, 4))
             self.rr_p[key][:, 0] = self.r_pks[key][1:, 0]  # set timings
             # timings assumed to be at the R-peak (second R-peak for difference)
 
@@ -728,7 +728,7 @@ class ECGAnalysis(object):
             self.rr_p[key][:, 2] = self.r_pks[key][1:, 1]-self.q_trs[key][1:, 1]
 
             # BW: Charleton X_b1 - mean of R-peak and Q-trough values
-            self.rr_p[key][:, 3] = np.mean([self.r_pks[key][1:, 1], self.q_trs[key][1:, 1]], axis=0)
+            self.rr_p[key][:, 3] = mean([self.r_pks[key][1:, 1], self.q_trs[key][1:, 1]], axis=0)
 
             # create spline data points
             self.rr_spl[key] = self._SplineCreation(self.rr_p[key], dt=0.2)
@@ -745,7 +745,7 @@ class ECGAnalysis(object):
             self.rr[key] = dict()  # another dictionary to store obtained RR times since they will be different lengths
             # for different parameters
 
-            rr_splf = np.zeros((len(self.rr_spl[key][:, 1]), 3))  # spline filtered allocation
+            rr_splf = zeros((len(self.rr_spl[key][:, 1]), 3))  # spline filtered allocation
             # step 1 - bandpass filter with pass region between 0.1-0.5Hz
             fs = 1/(self.rr_spl[key][1, 0]-self.rr_spl[key][0, 0])  # spline data frequency
             wl = 0.1/(0.5*fs)  # low cutoff frequency as % of nyquist frequency
@@ -754,7 +754,7 @@ class ECGAnalysis(object):
             b, a = signal.butter(5, [wl, wh], 'bandpass')  # filtfilt, -> order is 2x given
 
             # remove mean from data and filter
-            mn = np.mean(self.rr_spl[key][:, 1:], axis=0)
+            mn = mean(self.rr_spl[key][:, 1:], axis=0)
             rr_splf[:,0] = signal.filtfilt(b, a, self.rr_spl[key][:, 1]-mn[0])
             rr_splf[:,1] = signal.filtfilt(b, a, self.rr_spl[key][:, 2]-mn[1])
             rr_splf[:,2] = signal.filtfilt(b, a, self.rr_spl[key][:, 3]-mn[2])
@@ -775,14 +775,14 @@ class ECGAnalysis(object):
                 minpt = signal.argrelmin(rr_splf[:, i])[0]
                 maxpt = signal.argrelmax(rr_splf[:, i])[0]
 
-                q3 = np.percentile(rr_splf[maxpt, i], 75)  # 3rd quartile (75th percentile)
+                q3 = percentile(rr_splf[maxpt, i], 75)  # 3rd quartile (75th percentile)
                 thr = 0.2*q3  # threshold
 
                 # step 3 - valid breath cycle is max>thr, min<0, max>thr with no max/min in between
                 # local extrema sorted by index
                 # local max T/F.  True=>maximum, False=>minimum
-                ext, etp = zip(*sorted(zip(np.append(maxpt, minpt), [True]*len(maxpt)+[False]*len(minpt))))
-                ext, etp = np.array(ext), np.array(etp)
+                ext, etp = zip(*sorted(zip(append(maxpt, minpt), [True]*len(maxpt)+[False]*len(minpt))))
+                ext, etp = array(ext), array(etp)
 
                 brth_cyc = []  # initialize breath cycle array
                 rr = []  # initialize respiratory rate array
@@ -796,7 +796,7 @@ class ECGAnalysis(object):
                             # append time and breathing frequency
                             rr.append([self.rr_spl[key][ext[j+1], 0], 1/(self.rr_spl[key][ext[j+2], 0]-
                                                                          self.rr_spl[key][ext[j], 0])])
-                self.rr[key][param] = np.array(rr)
+                self.rr[key][param] = array(rr)
 
                 if debug:
                     ax[i].plot(self.rr_spl[key][minpt, 0], rr_splf[minpt, i], '*')
@@ -833,8 +833,8 @@ class ECGAnalysis(object):
 
             b, a = signal.butter(5, [wl, wh], 'bandpass')  # filtfilt, -> order is 2x given
 
-            rr_splf = np.zeros_like(self.rr_spl[key][:, 1:])
-            mn = np.mean(self.rr_spl[key][:, 1:], axis=0)
+            rr_splf = zeros_like(self.rr_spl[key][:, 1:])
+            mn = mean(self.rr_spl[key][:, 1:], axis=0)
 
             # remove mean and apply filter to input spline data
             # rr_splf[:, 0] = signal.filtfilt(b, a, self.rr_spl[key][:, 1]-mn[0])
@@ -856,15 +856,15 @@ class ECGAnalysis(object):
 
                 # step 3 - calculate absolute value diff. between subsequent local extrema
                 # 3rd quartile of differences, threshold = 0.1*Q3
-                ext, etp = zip(*sorted(zip(np.append(maxpt, minpt), [True]*len(maxpt)+[False]*len(minpt))))
-                ext, etp = np.array(ext), np.array(etp)
+                ext, etp = zip(*sorted(zip(append(maxpt, minpt), [True]*len(maxpt)+[False]*len(minpt))))
+                ext, etp = array(ext), array(etp)
 
-                ext_diff = np.zeros(len(ext)-1)
+                ext_diff = zeros(len(ext)-1)
                 for j in range(len(ext)-1):
                     if etp[j] != etp[j+1]:  # ie min followed by max or max followed by min
                         ext_diff[j] = abs(self.rr_spl[key][ext[j], i+1]-self.rr_spl[key][ext[j+1], i+1])
 
-                thr = 0.1*np.percentile(ext_diff, 75)  # threshold value
+                thr = 0.1*percentile(ext_diff, 75)  # threshold value
 
                 if debug:
                     ax[i].plot(self.rr_spl[key][:, 0], self.rr_spl[key][:, i+1])
@@ -876,8 +876,8 @@ class ECGAnalysis(object):
                 for j in range(len(ext)-1):
                     if etp[j-rem] != etp[j-rem+1]:
                         if abs(self.rr_spl[key][ext[j-rem], i+1]-self.rr_spl[key][ext[j-rem+1], i+1]) < thr:
-                            ext = np.delete(ext, [j-rem, j-rem+1])
-                            etp = np.delete(etp, [j-rem, j-rem+1])
+                            ext = np_delete(ext, [j-rem, j-rem+1])
+                            etp = np_delete(etp, [j-rem, j-rem+1])
                             rem += 2
 
                 # step 5 - breath cycles are now minimum -> maximum -> minimum = 1 cycle
@@ -890,7 +890,7 @@ class ECGAnalysis(object):
                     elif etp[j] and not etp[j+1] and etp[j+2]:
                         brth_cyc_xnx.append([ext[j], ext[j+2]])
 
-                self.rr[key][param] = np.zeros((max([len(brth_cyc), len(brth_cyc_xnx)]), 2))
+                self.rr[key][param] = zeros((max([len(brth_cyc), len(brth_cyc_xnx)]), 2))
 
                 if len(brth_cyc) < len(brth_cyc_xnx):
                     brth_cyc = brth_cyc_xnx
@@ -937,26 +937,26 @@ class ECGAnalysis(object):
             bwsf = interpolate.CubicSpline(self.rr[key]['bw'][:, 0], self.rr[key]['bw'][:, 1])
 
             if use_given_time:
-                x = np.unique(np.concatenate((self.rr[key]['fm'][:, 0], self.rr[key]['am'][:, 0],
+                x = unique(concatenate((self.rr[key]['fm'][:, 0], self.rr[key]['am'][:, 0],
                                               self.rr[key]['bw'][:, 0])))
             else:
                 tmin = max([self.rr[key]['fm'][0, 0], self.rr[key]['am'][0, 0], self.rr[key]['bw'][0, 0]])
                 tmax = min([self.rr[key]['fm'][-1, 0], self.rr[key]['am'][-1, 0], self.rr[key]['bw'][-1, 0]])
-                x = np.arange(tmin, tmax, 0.2)
-            self.lqi[key] = np.array([False]*len(x))  # Low Quality Index
+                x = arange(tmin, tmax, 0.2)
+            self.lqi[key] = array([False]*len(x))  # Low Quality Index
 
             fms = fmsf(x)
             ams = amsf(x)
             bws = bwsf(x)
 
-            self.st_dev[key] = np.std(np.array([bws, ams, fms]), axis=0)
-            rr = np.mean(np.array([bws, ams, fms]), axis=0)
+            self.st_dev[key] = std(array([bws, ams, fms]), axis=0)
+            rr = mean(array([bws, ams, fms]), axis=0)
 
             for i in range(len(self.st_dev[key])):
                 if self.st_dev[key][i] > 4:
                     self.lqi[key][i] = True  # if Standard Dev > 4 BPM Low Quality Index
 
-            self.rr_fuse[key] = np.zeros((len(rr), 2))
+            self.rr_fuse[key] = zeros((len(rr), 2))
             self.rr_fuse[key][:, 1] = rr
             self.rr_fuse[key][:, 0] = x
 
@@ -964,9 +964,9 @@ class ECGAnalysis(object):
                 f, ax = pl.subplots(figsize=(16, 5))
                 line1, = ax.plot(self.rr_fuse[key][:, 0], self.rr_fuse[key][:, 1], label='Fused Est.')
 
-                ind = np.argwhere(self.lqi[key][1:] != self.lqi[key][:-1]).flatten() + 1
-                ind = np.append(ind, len(self.lqi[key]))
-                ind = np.insert(ind, 0, 0)
+                ind = argwhere(self.lqi[key][1:] != self.lqi[key][:-1]).flatten() + 1
+                ind = append(ind, len(self.lqi[key]))
+                ind = insert(ind, 0, 0)
                 for i1, i2 in zip(ind[:-1], ind[1:]+1):
                     ax.fill_between(x[i1:i2], rr[i1:i2]-self.st_dev[key][i1:i2], rr[i1:i2]+self.st_dev[key][i1:i2],
                                     alpha=0.5, color='red' if self.lqi[key][i1] else 'blue')
