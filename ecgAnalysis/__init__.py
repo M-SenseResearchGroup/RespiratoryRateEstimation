@@ -1,1 +1,1 @@
-from ECG.analysis import ECGAnalysis, EcgData
+from .analysis import *
