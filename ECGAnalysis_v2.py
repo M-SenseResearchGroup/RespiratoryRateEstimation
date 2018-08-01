@@ -66,22 +66,22 @@ class ECGAnalysis(object):
         self.nyq = 0.5*self.fs  # Nyquist frequency is half sampling frequency
 
     def TestFunctions(self, count='adv', fuse=True):
-        self.ElimLowFreq()
-        self.ElimVeryHighFreq()
-        self.ElimMainsFreq()
-        self.CheckLeadInversion()
-        self.ElimSubCardiacFreq()
-        self.DerivativeFilter()
-        self.MovingAverageFilter()
+        self.ElimLowFreq(debug=True)
+        self.ElimVeryHighFreq(debug=True)
+        self.ElimMainsFreq(debug=True)
+        self.CheckLeadInversion(debug=True)
+        self.ElimSubCardiacFreq(debug=True)
+        self.DerivativeFilter(debug=False)
+        self.MovingAverageFilter(debug=False)
         self.DetectRPeaks(debug=False)
         self.PlotHeartRate()
-        self.RespRateExtraction()
+        self.RespRateExtraction(debug=True)
         if count == 'orig':
             self.CountOriginal(debug=False)
         if count == 'adv':
             self.CountAdv(debug=True)
         if fuse:
-            self.SmartModFusion(use_given_time=True)
+            self.SmartModFusion(use_given_time=True, debug=True)
 
     def ElimLowFreq(self, cutoff=3, N=1, debug=False):
         """
@@ -977,6 +977,6 @@ class ECGAnalysis(object):
                 ax.legend(handles=[b_p, r_p, line1])
 
 
-# f = open('..\\sample_EcgAnalysis_v2_data.pickle', 'rb')
-# data = pickle_load(f)
-# test = ECGAnalysis(data['KJ'])
+f = open('..\\sample_EcgAnalysis_v2_data.pickle', 'rb')
+data = pickle_load(f)
+test = ECGAnalysis(data['KJ'])
