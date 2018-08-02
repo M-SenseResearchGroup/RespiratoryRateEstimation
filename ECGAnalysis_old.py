@@ -87,23 +87,25 @@ class ECGAnalysis(object):
 		
 		s = timer()
 		
-		self.ElimLowFreq() #Eliminate Low Frequencies
+		deb = False
+		
+		self.ElimLowFreq(debug=deb) #Eliminate Low Frequencies
 		print(f'Eliminate Low Frequencies: {timer()-s}')
 		s = timer()
 		
-		self.ElimVeryHighFreq() #Eliminate High Frequencies
+		self.ElimVeryHighFreq(debug=deb) #Eliminate High Frequencies
 		print(f'Eliminate Very High Frequencies: {timer()-s}')
 		s = timer()
 		
-		self.ElimMainsFreq() #Eliminate Mains frequency
+		self.ElimMainsFreq(debug=deb) #Eliminate Mains frequency
 		print(f'Eliminate Mains Frequencies: {timer()-s}')
 		s = timer()
 		
-		self.CheckLeadInversion() #check for lead inversion
+		self.CheckLeadInversion(debug=deb) #check for lead inversion
 		print(f'Check Lead Inversion: {timer()-s}')
 		s = timer()
 		
-		self.ElimSubCardiacFreq() #Eliminate sub-cardiac frequencies
+		self.ElimSubCardiacFreq(debug=deb) #Eliminate sub-cardiac frequencies
 		print(f'Eliminate Sub-cardiac Frequencies: {timer()-s}')
 		s = timer()
 		
@@ -120,11 +122,11 @@ class ECGAnalysis(object):
 		Bandwidth modulation, Amplitude modulation, Frequency modulation.
 		"""
 		s = timer()
-		self.FindPeaksLearning() #learning phase for finding R-peaks
+		self.FindPeaksLearning(debug=True) #learning phase for finding R-peaks
 		print(f'Find Peaks Learning: {timer()-s}')
 		s = timer()
 		
-		self.FindRPeaks(debug=False) #find R-peaks
+		self.FindRPeaks(debug=True) #find R-peaks
 		print(f'Find R-Peaks: {timer()-s}')
 		s = timer()
 		
@@ -157,7 +159,7 @@ class ECGAnalysis(object):
 		s = timer()
 		
 		#Fuse estimates together
-		self.rr_est = ECGAnalysis.SmartModulationFusion(self.rr_bw,self.rr_am,self.rr_fm)
+		self.rr_est,self.lqi = ECGAnalysis.SmartModFusion(self.rr_bw,self.rr_am,self.rr_fm)
 		print(f'RR Fusion: {timer()-s}')
 		
 	#Step 1 - eliminate low frequencies
@@ -348,6 +350,13 @@ class ECGAnalysis(object):
 		self.v_int = (cs[N:]-cs[:-N])/N
 		self.t_int = self.t_der[N-1:]
 		
+		#append 0s in places where arrays were shortened
+		self.v_int = np.append([0]*(N+1),self.v_int)
+		self.v_int = np.append(self.v_int,[0,0])
+		
+		self.v_der = np.append([0]*2,self.v_der)
+		self.v_der = np.append(self.v_der,[0]*2)
+		
 		if plot==True:
 			pl.figure(figsize=(9,5))
 			pl.plot(self.t_int,self.v_int,label='Moving Average')
@@ -374,11 +383,6 @@ class ECGAnalysis(object):
 		n_225 = int(round(0.225*self.fs))
 		n_lrn = int(round(self.tlearn*self.fs)) #number of samples in t_learn seconds
 		
-		#append 0s to front of integrated signal
-		self.v_int = np.append([0]*(len(self.v)-len(self.v_int)-2),self.v_int)
-		#number of 0s needs to be changed if different derivative scheme
-		self.v_der = np.append([0,0],self.v_der)
-		
 		v_f = self.v[:n_lrn] #want only beginning t_learn seconds
 		v_int = self.v_int[:n_lrn]
 		v_der = self.v_der[:n_lrn]
@@ -402,24 +406,25 @@ class ECGAnalysis(object):
 		
 		for i in range(len(ii_pks)):
 			#append max slope for each peak
-			m_pos.append(max(v_der[ii_pks[i]-n_dly:ii_pks[i]+n_dly])) 
+			m_pos.append(max(v_der[ii_pks[i]-n_dly if ii_pks[i]-n_dly>=0 else 0\
+						  :ii_pks[i]+n_dly])) 
 			try: #to find descending half peak value for each peak
 				pki_h.append(np.where(v_int[ii_pks[i]:]<0.5*vi_pks[i])[0][0]+ii_pks[i])
 				longwave = False #not a long QRS wave
-			except: #if not found, set integration half peak value to max slope + delay 
-				pki_h.append(np.argmax(v_der[ii_pks[i]-n_dly:ii_pks[i]+n_dly])[0]\
-											 + (ii_pks-n_dly) + n_dly)
+			except: #if not found, set integration half peak value to max slope + delay
+				pki_h.append(np.argmax(v_der[ii_pks[i]-n_dly if ii_pks[i]-n_dly>0 else 0\
+								 :ii_pks[i]+n_dly])+ (ii_pks[i]-n_dly) + n_dly)
 				longwave = True
 			
 			if longwave==False: #search for max filt. peak in preceeding 125-225 ms
-				band_pk.append(np.argmax(v_f[pki_h[i]-n_225:pki_h[i]-n_125])+pki_h[i]-n_225)
+				band_pk.append(np.argmax(v_f[pki_h[i]-n_225 if pki_h[i]-n_225>0 else 0\
+								 :pki_h[i]-n_125])+pki_h[i]-n_225)
 			elif longwave==True: #if longwave, search in preceeding 150-250ms
-				band_pk.append(np.argmax(v_f[pki_h[i]-n_225-n_25:pki_h[i]-n_125-n_25])\
-								   +pki_h[i]-n_225-n_25)
+				band_pk.append(np.argmax(v_f[pki_h[i]-n_225-n_25 if pki_h[i]-n_225-n_25>0 else 0\
+								 :pki_h[i]-n_125-n_25])+pki_h[i]-n_225-n_25)
 		band_pk = np.array(band_pk)
-		
 		#determing if R peak or T wave
-		for i in range(0,len(ii_pks),2):
+		for i in range(0,len(ii_pks) if len(ii_pks)%2==0 else len(ii_pks)-1,2):
 			#if time between peaks is less than 200ms, first is R, second is T
 			#Due to being faster than physiologically possible
 			if t_f[band_pk[i+1]]-t_f[band_pk[i]]<0.2:
@@ -489,7 +494,7 @@ class ECGAnalysis(object):
 			ax[1].plot(r_t,r_v,'ro')
 			ax[1].plot(t_t,t_v,'go')
 			ax[1].axhline(self.tsn_f.t,linestyle='--',color='k')
-			ax.set_title('Find R-Peaks Learning')
+			ax[0].set_title('Find R-Peaks Learning')
 			pl.tight_layout()
 	
 	@staticmethod
@@ -572,12 +577,6 @@ class ECGAnalysis(object):
 		q_trs : ndarray
 			N-by-2 array of [q-trough timestamp, q-trough voltage]
 		"""
-		
-		self.v_der = np.append(self.v_der,[0,0])
-		self.v_der = np.append([0,0],self.v_der)
-		self.v_int = np.append(self.v_int,[0]*2) #append 2 zeros for derivative change
-		#append zeros to front for integration and d/dx change
-		self.v_int = np.append([0]*int(round(len(self.v)-len(self.v_int))),self.v_int)
 		
 		#number of samples in 25,125,225ms
 		n25,n125 = int(round(0.025*self.fs)),int(round(0.125*self.fs))
@@ -948,7 +947,7 @@ class ECGAnalysis(object):
 		return rr
 	
 	@staticmethod
-	def SmartModulationFusion(bw,am,fm,debug=False):
+	def SmartModFusion(bw,am,fm,use_given_time=True,plot=True):
 		"""
 		Modulation smart fusion of bandwidth, AM, and FM respiratory estimates.
 		From Karlen et al, 2013.  Respiratory rate is output of standard deviation of 
@@ -962,6 +961,10 @@ class ECGAnalysis(object):
 			N by 2 array of respiratory rate estimations and timings via AM parameter
 		fm : ndarray
 			N by 2 array of respiratory rate estimations and timings via FM parameter
+		use_given_time : bool
+			Use timings from BW/AM/FM data, or based on 0.2s timings.  Defaults to True.
+		plot : bool
+			Plot resulting data.  Defaults to True.
 		
 		Returns
 		-------
@@ -977,36 +980,64 @@ class ECGAnalysis(object):
 		amsf = interpolate.CubicSpline(am[:,0],am[:,1])
 		fmsf = interpolate.CubicSpline(fm[:,0],fm[:,1])
 		
-		tmin = min([bw[0,0],am[0,0],fm[0,0]])
-		tmax = min([bw[-1,0],am[-1,0],fm[-1,0]])
-		
-		x = np.arange(tmin,tmax,0.2)
+		if use_given_time==True:
+			x = np.unique(np.append(np.append(bw[:,0],am[:,0]),fm[:,0]))
+		else:
+			tmin = max([bw[0,0],am[0,0],fm[0,0]])
+			tmax = min([bw[-1,0],am[-1,0],fm[-1,0]])
+			x = np.arange(tmin,tmax,0.2)
+		lqi = np.array([False]*len(x)) #Low Quality Index
 		
 		bws = bwsf(x)
 		ams = amsf(x)
 		fms = fmsf(x)
 		
 		st_dev = np.std(np.array([bws,ams,fms]),axis=0)
-		rr = np.ones_like(st_dev)*-1
+		rr = np.mean(np.array([bws,ams,fms]),axis=0)
 		
 		for i in range(len(st_dev)):
-			if st_dev[i]<4:
-				rr[i] = np.mean([bws[i],ams[i],fms[i]])
+			if st_dev[i]>4:
+				lqi[i] = True #if Standard Dev > 4 BPM Low Quality Index
 		
 		rr_est = np.zeros((len(rr),2))
 		rr_est[:,1] = rr
 		rr_est[:,0] = x
 		
-		return rr_est
+		if plot==True:
+			f,ax = pl.subplots(figsize=(9,5))
+			ax.plot(rr_est[:,0],rr_est[:,1],label='Fused Est.')
+#			ax.plot(bw[:,0],bw[:,1],'--',alpha=0.5,label='BW Est.')
+#			ax.plot(am[:,0],am[:,1],'--',alpha=0.5,label='AM Est.')
+#			ax.plot(fm[:,0],fm[:,1],'--',alpha=0.5,label='FM Est.')
+			
+			ax.fill_between(x,rr-st_dev,rr+st_dev,alpha=0.5)
+			
+			ax.legend()
+			
+		
+		return rr_est,lqi
 
 t,v = np.genfromtxt('C:\\Users\\Lukas Adamowicz\\Dropbox\\Masters\\Project'+\
 				  '\\RespiratoryRate_HeartRate\\Python RRest\\sample_ecg.csv',\
 				  skip_header=0,unpack=True,delimiter=',')
+
+#narrow middle position
+start = np.where(t<=1509041360629)[0][-1]
+stop = np.where(t>=1509041663407)[0][0]
+
+#narrow back position
+#start = 1509041996888
+#stop = 1509042297391
+
+#narrow forward position
+#start = 1509043155605
+#stop = 1509043456128
+
+v,t = v[start:stop],t[start:stop]
+#v,t = v[250:20000],t[250:20000]
+
 t -= t[0]
 t /= 1000
-
-v,t = v[250:int(len(v)/6)],t[250:int(len(v)/6)]
-#v,t = v[250:20000],t[250:20000]
 
 test = ECGAnalysis(500,v,t)
 test.FilterData()
