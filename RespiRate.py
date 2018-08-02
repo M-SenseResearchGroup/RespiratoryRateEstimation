@@ -60,7 +60,7 @@ class RespiRate(QMainWindow):
         self.saveData.triggered.connect(self.save_data)
 
         # Exit menu action
-        exitAct = QAction(QIcon('next.png'), '&Exit', self)
+        exitAct = QAction(QIcon('Icons'+osep+'exit.png'), '&Exit', self)
         exitAct.setShortcut('Ctrl+Q')
         exitAct.setStatusTip('Exit application')
         exitAct.triggered.connect(qApp.quit)
@@ -97,13 +97,13 @@ class RespiRate(QMainWindow):
         setAct.triggered.connect(self.open_settings)
 
         # Open HR table window
-        self.rpkTabAct = QAction(QIcon('Icons'+osep+'next.png'), 'R-Peak Table', self)
+        self.rpkTabAct = QAction(QIcon('Icons'+osep+'table.png'), 'R-Peak Table', self)
         self.rpkTabAct.setStatusTip('View R-Peak times')
         self.rpkTabAct.setDisabled(True)
         self.rpkTabAct.triggered.connect(self.open_rpkTab)
 
         # Open RR table window
-        self.rrTabAct = QAction(QIcon('Icons'+osep+'next.png'), 'Breaths Table', self)
+        self.rrTabAct = QAction(QIcon('Icons'+osep+'table.png'), 'Breaths Table', self)
         self.rrTabAct.setStatusTip('View Breath times')
         self.rrTabAct.setDisabled(True)
         self.rrTabAct.triggered.connect(self.open_rrTab)
