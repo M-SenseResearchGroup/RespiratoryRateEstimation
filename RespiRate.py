@@ -8,7 +8,7 @@ Python 3.6.5 on Windows 10 with 64-bit Anaconda
 """
 
 from sys import exit as sys_exit, argv as sys_argv, excepthook as sys_excepthook
-from os import getcwd
+from os import getcwd, sep as osep
 from PyQt5.QtWidgets import QMainWindow, QApplication, QFileDialog, QAction, qApp, QMessageBox, QMenu, \
     QLabel, QLineEdit, QHBoxLayout, QVBoxLayout, QGroupBox, QDialog, QCheckBox, QPushButton, QWidget, QComboBox, \
     QRadioButton, QTableWidget, QTableWidgetItem, QTabWidget
@@ -27,6 +27,8 @@ from matplotlib.patches import Patch
 class RespiRate(QMainWindow):
     def __init__(self):
         super().__init__()
+
+        self.setWindowIcon(QIcon('Icons'+osep+'ecg_signal.png'))
 
         self.sbar = self.statusBar()  # new shorthand for status bar
         self.annots = None  # allocate for annotations to allow for checking later on
@@ -85,23 +87,23 @@ class RespiRate(QMainWindow):
         openData.triggered.connect(self.open_serialized_data)
 
         # Open filter settings window
-        filtSetAct = QAction(QIcon('Icons\\filter.png'), 'Filter Settings', self)
+        filtSetAct = QAction(QIcon('Icons'+osep+'filter.png'), 'Filter Settings', self)
         filtSetAct.setStatusTip('Open filter settings dialog')
         filtSetAct.triggered.connect(self.open_filter_settings)
 
         # Open settings window
-        setAct = QAction(QIcon('Icons\\configure.png'), 'Settings', self)
+        setAct = QAction(QIcon('Icons'+osep+'configure.png'), 'Settings', self)
         setAct.setStatusTip('Open settings dialog')
         setAct.triggered.connect(self.open_settings)
 
         # Open HR table window
-        self.rpkTabAct = QAction(QIcon('Icons\\next.png'), 'R-Peak Table', self)
+        self.rpkTabAct = QAction(QIcon('Icons'+osep+'next.png'), 'R-Peak Table', self)
         self.rpkTabAct.setStatusTip('View R-Peak times')
         self.rpkTabAct.setDisabled(True)
         self.rpkTabAct.triggered.connect(self.open_rpkTab)
 
         # Open RR table window
-        self.rrTabAct = QAction(QIcon('Icons\\next.png'), 'Breaths Table', self)
+        self.rrTabAct = QAction(QIcon('Icons'+osep+'next.png'), 'Breaths Table', self)
         self.rrTabAct.setStatusTip('View Breath times')
         self.rrTabAct.setDisabled(True)
         self.rrTabAct.triggered.connect(self.open_rrTab)
@@ -124,73 +126,63 @@ class RespiRate(QMainWindow):
         settingsmenu.addAction(setAct)
 
         # toolbar actions
-        self.allAct = QAction(QIcon('Icons\\arrow-continue.png'), 'Run All', self)
+        self.allAct = QAction(QIcon('Icons'+osep+'arrow-continue.png'), 'Run All', self)
         self.allAct.setToolTip('Run all analysis')
         self.allAct.setDisabled(True)
         self.allAct.triggered.connect(self.runALL)
 
-        # TODO change icon
-        self.elfAct = QAction(QIcon('Icons\\next.png'), 'Eliminate Low Frequencies', self)
+        self.elfAct = QAction(QIcon('Icons'+osep+'no_low_freq.png'), 'Eliminate Low Frequencies', self)
         self.elfAct.setToolTip('Eliminate Low Frequencies')
         self.elfAct.setDisabled(True)
         self.elfAct.triggered.connect(self.runELF)
 
-        # TODO change icon
-        self.evhfAct = QAction(QIcon('Icons\\next.png'), 'Eliminate Very High Frequencies', self)
+        self.evhfAct = QAction(QIcon('Icons'+osep+'no_high_freq.png'), 'Eliminate Very High Frequencies', self)
         self.evhfAct.setToolTip('Eliminate Very High Frequencies')
         self.evhfAct.setDisabled(True)
         self.evhfAct.triggered.connect(self.runEVHF)
 
-        # TODO change icon
-        self.emfAct = QAction(QIcon('Icons\\next.png'), 'Eliminate Mains Frequencies', self)
+        self.emfAct = QAction(QIcon('Icons'+osep+'no_mains_freq.png'), 'Eliminate Mains Frequencies', self)
         self.emfAct.setToolTip('Eliminate Mains Frequencies')
         self.emfAct.setDisabled(True)
         self.emfAct.triggered.connect(self.runEMF)
 
-        # TODO change icon
-        self.cliAct = QAction(QIcon('Icons\\next.png'), 'Check Lead Inversion', self)
+        self.cliAct = QAction(QIcon('Icons'+osep+'lead_inv.png'), 'Check Lead Inversion', self)
         self.cliAct.setToolTip('Check for lead inversion')
         self.cliAct.setDisabled(True)
         self.cliAct.triggered.connect(self.runCLI)
 
-        # TODO change icon
-        self.escAct = QAction(QIcon('Icons\\next.png'), 'Eliminate Sub-cardiac Frequencies', self)
+        self.escAct = QAction(QIcon('Icons'+osep+'no_subcardiac_freq.png'), 'Eliminate Sub-cardiac Frequencies', self)
         self.escAct.setToolTip('Eliminate Sub-cardiac Frequencies')
         self.escAct.setDisabled(True)
         self.escAct.triggered.connect(self.runESC)
 
-        # TODO change icon
-        self.derAct = QAction(QIcon('Icons\\next.png'), 'Derivative Filter', self)
+        self.derAct = QAction(QIcon('Icons'+osep+'der_filter.png'), 'Derivative Filter', self)
         self.derAct.setToolTip('Calculate Derivative Filter')
         self.derAct.setDisabled(True)
         self.derAct.triggered.connect(self.runDER)
 
-        # TODO change icon
-        self.maAct = QAction(QIcon('Icons\\next.png'), 'Moving Average Filter', self)
+        self.maAct = QAction(QIcon('Icons'+osep+'mov_avg.png'), 'Moving Average Filter', self)
         self.maAct.setToolTip('Calculating Moving Average')
         self.maAct.setDisabled(True)
         self.maAct.triggered.connect(self.runMA)
 
-        # TODO change icon
-        self.rpkAct = QAction(QIcon('Icons\\next.png'), 'Detect R-Peaks', self)
+        self.rpkAct = QAction(QIcon('Icons'+osep+'r_pks.png'), 'Detect R-Peaks', self)
         self.rpkAct.setToolTip('Determine R-peak locations')
         self.rpkAct.setDisabled(True)
         self.rpkAct.triggered.connect(self.runRPK)
 
-        # TODO change icon
-        self.rrpAct = QAction(QIcon('Icons\\next.png'), 'Extract RR Parameters', self)  # Respiratory rate params
+        # Respiratory rate params
+        self.rrpAct = QAction(QIcon('Icons'+osep+'rr_param.png'), 'Extract RR Parameters', self)
         self.rrpAct.setToolTip('Extract Respiratory Rate Calculation Parameters')
         self.rrpAct.setDisabled(True)
         self.rrpAct.triggered.connect(self.runRRP)
 
-        # TODO change icon
-        self.cntAct = QAction(QIcon('Icons\\next.png'), 'Perform Count', self)  # count adv/orig
+        self.cntAct = QAction(QIcon('Icons'+osep+'count.png'), 'Perform Count', self)  # count adv/orig
         self.cntAct.setToolTip('Perform count method set in settings')
         self.cntAct.setDisabled(True)
         self.cntAct.triggered.connect(self.runCNT)
 
-        # TODO change icon
-        self.fusAct = QAction(QIcon('Icons\\next.png'), 'Fuse Estimates', self)
+        self.fusAct = QAction(QIcon('Icons'+osep+'fuse.png'), 'Fuse Estimates', self)
         self.fusAct.setToolTip('Fuse Respiratory Rate estimates')
         self.fusAct.setDisabled(True)
         self.fusAct.triggered.connect(self.runFUS)
