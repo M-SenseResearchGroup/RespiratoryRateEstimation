@@ -873,7 +873,7 @@ class FilterSettingsWindow(QDialog):
         mafTxt.setText(str(self.mov_len))
         mafTxt.textEdited.connect(lambda text: self.changeIntVals(text, 'mov_len'))
 
-        mafLayout.addWidget(QLabel('Length: ', self))
+        mafLayout.addWidget(QLabel('Length (ms): ', self))
         mafLayout.addWidget(mafTxt)
         maf_gb.setLayout(mafLayout)
 
